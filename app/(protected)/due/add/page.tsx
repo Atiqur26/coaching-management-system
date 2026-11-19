@@ -1,30 +1,19 @@
+
 'use client';
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
-type Student = {
-  id: string;
-  name: string;
-  student_code: string | null;
-  program: string | null;
-};
-
-export default function AddDuePage() {
-  const [students, setStudents] = useState<Student[]>([]);
-  const [studentId, setStudentId] = useState('');
+export default function AddDue() {
+  const [students, setStudents] = useState<any[]>([]);
+  const [student, setStudent] = useState('');
   const [month, setMonth] = useState(
     new Date().toISOString().slice(0, 7)
   );
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    loadStudents();
-  }, []);
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
 
   async function loadStudents() {
     const { data, error } = await supabase()
@@ -34,163 +23,167 @@ export default function AddDuePage() {
       .order('name');
 
     if (error) {
-      setError(error.message);
+      setMsg(error.message);
       return;
     }
 
     setStudents(data || []);
   }
 
-  async function saveDue(e: React.FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    loadStudents();
+  }, []);
+
+  const selectedStudent = students.find(
+    s => s.id === student
+  );
+
+  async function saveDue(e: React.FormEvent) {
     e.preventDefault();
-    setMessage('');
-    setError('');
+    setMsg('');
 
     const dueAmount = Number(amount);
 
-    if (!studentId) {
-      setError('শিক্ষার্থী নির্বাচন করুন।');
+    if (!student) {
+      setMsg('শিক্ষার্থী নির্বাচন করুন।');
       return;
     }
 
     if (!month) {
-      setError('বকেয়ার মাস নির্বাচন করুন।');
+      setMsg('বকেয়ার মাস নির্বাচন করুন।');
       return;
     }
 
     if (!Number.isFinite(dueAmount) || dueAmount <= 0) {
-      setError('সঠিক বকেয়ার টাকা লিখুন।');
+      setMsg('সঠিক বকেয়ার টাকা লিখুন।');
       return;
     }
 
-    setLoading(true);
+    setBusy(true);
 
     const { error } = await supabase()
       .from('student_dues')
       .insert({
-        student_id: studentId,
-        due_month: `${month}-01`,
+        student_id: student,
+        due_month: month + '-01',
         amount: dueAmount,
-        note: note.trim() || null
+        note: note
       });
 
-    setLoading(false);
+    setBusy(false);
 
     if (error) {
       if (error.code === '23505') {
-        setError('এই শিক্ষার্থীর এই মাসের Due আগে থেকেই আছে।');
+        setMsg('এই শিক্ষার্থীর এই মাসের Due আগে থেকেই যোগ করা আছে।');
       } else {
-        setError(error.message);
+        setMsg(error.message);
       }
       return;
     }
 
-    setMessage('Due সফলভাবে সংরক্ষণ হয়েছে।');
+    setMsg('Due সফলভাবে সংরক্ষণ হয়েছে।');
     setAmount('');
     setNote('');
   }
 
   return (
-    <div className="p-4 md:p-6 max-w-3xl mx-auto">
-      <div className="bg-white rounded-xl shadow p-5">
-        <h1 className="text-2xl font-bold mb-2">
-          Add Due
-        </h1>
-
-        <p className="text-gray-500 mb-6">
-          শিক্ষার্থীর মাস অনুযায়ী বকেয়া টাকা যোগ করুন।
-        </p>
-
-        {message && (
-          <div className="bg-green-100 text-green-700 p-3 rounded mb-4">
-            {message}
+    <>
+      <div className="pagehead">
+        <div>
+          <h1>Add Due</h1>
+          <div className="muted">
+            শিক্ষার্থীর মাস অনুযায়ী বকেয়া টাকা যোগ করুন।
           </div>
-        )}
+        </div>
+      </div>
 
-        {error && (
-          <div className="bg-red-100 text-red-700 p-3 rounded mb-4">
-            {error}
-          </div>
-        )}
+      <div className="panel section">
+        <h2 style={{ fontSize: 19, marginTop: 0 }}>
+          নতুন বকেয়া যোগ
+        </h2>
 
-        <form onSubmit={saveDue} className="space-y-5">
-          <div>
-            <label className="block font-medium mb-2">
-              শিক্ষার্থী নির্বাচন
-            </label>
+        <form onSubmit={saveDue}>
+          <div className="formgrid">
 
-            <select
-              value={studentId}
-              onChange={(e) => setStudentId(e.target.value)}
-              className="w-full border rounded-lg p-3"
-              required
-            >
-              <option value="">শিক্ষার্থী নির্বাচন করুন</option>
-
-              {students.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} - {s.student_code || 'No ID'} 
-                  {s.program ? ` (${s.program})` : ''}
+            <div className="field">
+              <label>শিক্ষার্থী নির্বাচন</label>
+              <select
+                required
+                value={student}
+                onChange={e => setStudent(e.target.value)}
+              >
+                <option value="">
+                  শিক্ষার্থী নির্বাচন করুন
                 </option>
-              ))}
-            </select>
+
+                {students.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} — {s.student_code}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field">
+              <label>বকেয়ার মাস</label>
+              <input
+                type="month"
+                required
+                value={month}
+                onChange={e => setMonth(e.target.value)}
+              />
+            </div>
+
+            {selectedStudent && (
+              <div className="field full">
+                <div className="panel">
+                  <h3>শিক্ষার্থীর তথ্য</h3>
+                  <p>নাম: {selectedStudent.name}</p>
+                  <p>Student ID: {selectedStudent.student_code}</p>
+                  <p>কোর্স: {selectedStudent.program}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="field">
+              <label>বকেয়ার পরিমাণ (টাকা)</label>
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                required
+                value={amount}
+                onChange={e => setAmount(e.target.value)}
+                placeholder="যেমন: 1000"
+              />
+            </div>
+
+            <div className="field full">
+              <label>বিবরণ / নোট</label>
+              <input
+                value={note}
+                onChange={e => setNote(e.target.value)}
+                placeholder="বকেয়ার বিবরণ লিখুন"
+              />
+            </div>
+
           </div>
 
-          <div>
-            <label className="block font-medium mb-2">
-              বকেয়ার মাস
-            </label>
-
-            <input
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="w-full border rounded-lg p-3"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block font-medium mb-2">
-              বকেয়ার পরিমাণ (টাকা)
-            </label>
-
-            <input
-              type="number"
-              min="0.01"
-              step="0.01"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="যেমন: 1000"
-              className="w-full border rounded-lg p-3"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block font-medium mb-2">
-              বিবরণ (ঐচ্ছিক)
-            </label>
-
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="বকেয়ার কারণ লিখুন"
-              className="w-full border rounded-lg p-3"
-              rows={3}
-            />
-          </div>
+          {msg && (
+            <div className="notice" style={{ marginTop: 15 }}>
+              {msg}
+            </div>
+          )}
 
           <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg p-3 disabled:opacity-50"
+            className="btn"
+            disabled={busy}
+            style={{ marginTop: 16 }}
           >
-            {loading ? 'সংরক্ষণ হচ্ছে...' : 'Save Due'}
+            {busy ? 'সংরক্ষণ হচ্ছে...' : 'Save Due'}
           </button>
         </form>
       </div>
-    </div>
+    </>
   );
 }
-
