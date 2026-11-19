@@ -6,11 +6,10 @@ import { supabase } from '@/lib/supabase';
 export default function Payments() {
   const [students, setStudents] = useState<any[]>([]);
   const [rows, setRows] = useState<any[]>([]);
+  const [dues, setDues] = useState<any[]>([]);
   const [student, setStudent] = useState('');
   const [amount, setAmount] = useState('');
-  const [month, setMonth] = useState(
-    new Date().toISOString().slice(0, 7)
-  );
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [method, setMethod] = useState('Cash');
   const [note, setNote] = useState('');
   const [msg, setMsg] = useState('');
@@ -20,8 +19,11 @@ export default function Payments() {
   async function load() {
     const db = supabase();
 
-    const [{ data: s, error: studentError },
-           { data: p, error: paymentError }] = await Promise.all([
+    const [
+      { data: s, error: studentError },
+      { data: p, error: paymentError },
+      { data: d, error: dueError }
+    ] = await Promise.all([
       db.from('students')
         .select('id,name,student_code,monthly_fee,program')
         .eq('active', true)
@@ -29,18 +31,25 @@ export default function Payments() {
 
       db.from('payments')
         .select('*,students(name,student_code)')
-        .order('paid_at', { ascending: false })
+        .order('paid_at', { ascending: false }),
+
+      db.from('student_dues')
+        .select('*')
     ]);
 
-    if (studentError || paymentError) {
+    if (studentError || paymentError || dueError) {
       setMsg(
-        studentError?.message || paymentError?.message || 'তথ্য লোড হয়নি'
+        studentError?.message ||
+        paymentError?.message ||
+        dueError?.message ||
+        'তথ্য লোড হয়নি'
       );
       return;
     }
 
     setStudents(s || []);
     setRows(p || []);
+    setDues(d || []);
   }
 
   useEffect(() => {
@@ -51,6 +60,15 @@ export default function Payments() {
 
   const monthlyFee = Number(selectedStudent?.monthly_fee || 0);
 
+  // Add Due থেকে যোগ করা টাকা
+  const manualDue = dues
+    .filter(d =>
+      d.student_id === student &&
+      String(d.due_month).slice(0, 7) === month
+    )
+    .reduce((sum, d) => sum + Number(d.amount || 0), 0);
+
+  // এই মাসে আগে জমা দেওয়া টাকা
   const monthPayments = rows.filter(p =>
     p.student_id === student &&
     String(p.fee_month).slice(0, 7) === month
@@ -60,7 +78,9 @@ export default function Payments() {
     (sum, p) => sum + Number(p.amount || 0), 0
   );
 
-  const due = Math.max(0, monthlyFee - paid);
+  // মাসিক ফি + Add Due - আগের জমা
+  const totalFee = monthlyFee + manualDue;
+  const due = Math.max(0, totalFee - paid);
 
   const income = rows.reduce(
     (sum, p) => sum + Number(p.amount || 0), 0
@@ -81,13 +101,13 @@ export default function Payments() {
       return;
     }
 
-    if (paymentAmount <= 0 || !Number.isFinite(paymentAmount)) {
+    if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
       setMsg('সঠিক টাকার পরিমাণ লিখুন।');
       return;
     }
 
     if (paymentAmount > due) {
-      setMsg('নির্বাচিত মাসের বকেয়ার চেয়ে বেশি টাকা জমা দেওয়া যাবে না।');
+      setMsg('মোট বকেয়ার চেয়ে বেশি টাকা জমা দেওয়া যাবে না।');
       return;
     }
 
@@ -154,7 +174,7 @@ export default function Payments() {
         <div>
           <h1>পেমেন্ট ও মাসিক আয়</h1>
           <div className="muted">
-            মাসভিত্তিক বকেয়া, ফি আদায় ও PDF রসিদ
+            মাসভিত্তিক বকেয়া, Add Due ও ফি আদায়
           </div>
         </div>
       </div>
@@ -190,6 +210,7 @@ export default function Payments() {
                 setStudent(e.target.value);
                 setAmount('');
                 setReceipt(null);
+                setMsg('');
               }}
             >
               <option value="">শিক্ষার্থী নির্বাচন</option>
@@ -211,6 +232,7 @@ export default function Payments() {
                 setMonth(e.target.value);
                 setAmount('');
                 setReceipt(null);
+                setMsg('');
               }}
             />
           </div>
@@ -222,15 +244,25 @@ export default function Payments() {
 
             <p>শিক্ষার্থী: {selectedStudent.name}</p>
             <p>নির্বাচিত মাস: {month}</p>
-            <p>মাসিক ফি: ৳ {monthlyFee.toLocaleString('en-BD')}</p>
-            <p>আগের জমা: ৳ {paid.toLocaleString('en-BD')}</p>
+            <p>
+              মাসিক ফি: ৳ {monthlyFee.toLocaleString('en-BD')}
+            </p>
+            <p>
+              Add Due: ৳ {manualDue.toLocaleString('en-BD')}
+            </p>
+            <p>
+              মোট ফি ও অতিরিক্ত বকেয়া: ৳ {totalFee.toLocaleString('en-BD')}
+            </p>
+            <p>
+              আগে জমা: ৳ {paid.toLocaleString('en-BD')}
+            </p>
 
             <h3 style={{ color: '#dc2626' }}>
               বর্তমান বকেয়া: ৳ {due.toLocaleString('en-BD')}
             </h3>
 
             {due === 0 && (
-              <p>এই মাসের সম্পূর্ণ ফি পরিশোধ হয়েছে।</p>
+              <p>এই মাসের সম্পূর্ণ টাকা পরিশোধ হয়েছে।</p>
             )}
           </div>
         )}
@@ -294,31 +326,19 @@ export default function Payments() {
 
           <hr />
 
-          <p>
-            <b>Receipt No:</b> {receipt.id}
-          </p>
-          <p>
-            <b>শিক্ষার্থীর নাম:</b> {receipt.students?.name}
-          </p>
-          <p>
-            <b>Student ID:</b> {receipt.students?.student_code}
-          </p>
-          <p>
-            <b>ফি মাস:</b> {String(receipt.fee_month).slice(0, 7)}
-          </p>
+          <p><b>Receipt No:</b> {receipt.id}</p>
+          <p><b>শিক্ষার্থীর নাম:</b> {receipt.students?.name}</p>
+          <p><b>Student ID:</b> {receipt.students?.student_code}</p>
+          <p><b>ফি মাস:</b> {String(receipt.fee_month).slice(0, 7)}</p>
           <p>
             <b>জমার তারিখ:</b>{' '}
             {new Date(receipt.paid_at || Date.now()).toLocaleDateString('bn-BD')}
           </p>
-          <p>
-            <b>পেমেন্ট পদ্ধতি:</b> {receipt.method}
-          </p>
+          <p><b>পেমেন্ট পদ্ধতি:</b> {receipt.method}</p>
           <p>
             <b>জমার পরিমাণ:</b> ৳ {Number(receipt.amount).toLocaleString('en-BD')}
           </p>
-          <p>
-            <b>নোট:</b> {receipt.note || '—'}
-          </p>
+          <p><b>নোট:</b> {receipt.note || '—'}</p>
 
           <hr />
 
