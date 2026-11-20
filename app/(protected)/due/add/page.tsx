@@ -15,7 +15,7 @@ export default function AddDue() {
   const [busy, setBusy] = useState(false);
 
   async function loadStudents() {
-    const { data, error } = await supabase()
+    const { data, error } = await supabase
       .from('students')
       .select('id,name,student_code,program')
       .eq('active', true)
