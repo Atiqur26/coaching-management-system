@@ -594,22 +594,15 @@ export default function Payments() {
               </tr>
             </thead>
 
-            <tbody>
-              {receipt.adjustedMonths.map((d: any, i: number) => (
-                <tr key={i}>
-                  <td>{i + 1}</td>
-                  <td>{formatMonth(d.month)}</td>
-                  <td>৳ {formatMoney(d.todayPaid)}</td>
-                  <td>৳ {formatMoney(d.remaining)}</td>
-                </tr>
-              ))}
-
-              {receipt.adjustedMonths.length === 0 && (
-                <tr>
-                  <td colSpan={4}>কোনো মাস সমন্বয় হয়নি।</td>
-                </tr>
-              )}
-            </tbody>
+           <tbody>
+  {receipt.adjustedMonths.map((d: any, i: number) => (
+    <tr key={i}>
+      <td>{formatMonth(d.month)}</td>
+      <td>৳ {formatMoney(d.todayPaid)}</td>
+      <td>৳ {formatMoney(d.remaining)}</td>
+    </tr>
+  ))}
+</tbody>
           </table>
 
           {receipt.note && (
