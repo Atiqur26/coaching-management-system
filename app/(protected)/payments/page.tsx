@@ -9,23 +9,23 @@ export default function Payments() {
   const [dues, setDues] = useState<any[]>([]);
   const [student, setStudent] = useState('');
   const [amount, setAmount] = useState('');
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [method, setMethod] = useState('Cash');
   const [note, setNote] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [receipt, setReceipt] = useState<any>(null);
+  const [receiptAllocations, setReceiptAllocations] = useState<any[]>([]);
 
   async function load() {
     const db = supabase();
 
     const [
-      { data: s, error: studentError },
-      { data: p, error: paymentError },
-      { data: d, error: dueError }
+      { data: s, error: se },
+      { data: p, error: pe },
+      { data: d, error: de }
     ] = await Promise.all([
       db.from('students')
-        .select('id,name,student_code,monthly_fee,program')
+        .select('id,name,student_code,program,monthly_fee')
         .eq('active', true)
         .order('name'),
 
@@ -35,15 +35,11 @@ export default function Payments() {
 
       db.from('student_dues')
         .select('*')
+        .order('due_month', { ascending: true })
     ]);
 
-    if (studentError || paymentError || dueError) {
-      setMsg(
-        studentError?.message ||
-        paymentError?.message ||
-        dueError?.message ||
-        'তথ্য লোড হয়নি'
-      );
+    if (se || pe || de) {
+      setMsg(se?.message || pe?.message || de?.message || 'তথ্য লোড হয়নি');
       return;
     }
 
@@ -58,29 +54,41 @@ export default function Payments() {
 
   const selectedStudent = students.find(s => s.id === student);
 
-  const monthlyFee = Number(selectedStudent?.monthly_fee || 0);
+  // শিক্ষার্থীর সব মাসের বকেয়া হিসাব
+  const studentDues = dues
+    .filter(d => d.student_id === student)
+    .map(d => {
+      const month = String(d.due_month).slice(0, 7);
 
-  // Add Due থেকে যোগ করা টাকা
-  const manualDue = dues
-    .filter(d =>
-      d.student_id === student &&
-      String(d.due_month).slice(0, 7) === month
-    )
-    .reduce((sum, d) => sum + Number(d.amount || 0), 0);
+      const paid = rows
+        .filter(p =>
+          p.student_id === student &&
+          String(p.fee_month).slice(0, 7) === month
+        )
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-  // এই মাসে আগে জমা দেওয়া টাকা
-  const monthPayments = rows.filter(p =>
-    p.student_id === student &&
-    String(p.fee_month).slice(0, 7) === month
+      const total = Number(d.amount || 0);
+
+      return {
+        ...d,
+        month,
+        total,
+        paid,
+        remaining: Math.max(0, total - paid)
+      };
+    });
+
+  const totalDue = studentDues.reduce(
+    (sum, d) => sum + d.remaining, 0
   );
 
-  const paid = monthPayments.reduce(
-    (sum, p) => sum + Number(p.amount || 0), 0
+  const totalOriginal = studentDues.reduce(
+    (sum, d) => sum + d.total, 0
   );
 
-  // মাসিক ফি + Add Due - আগের জমা
-  const totalFee = monthlyFee + manualDue;
-  const due = Math.max(0, totalFee - paid);
+  const totalPaid = studentDues.reduce(
+    (sum, d) => sum + d.paid, 0
+  );
 
   const income = rows.reduce(
     (sum, p) => sum + Number(p.amount || 0), 0
@@ -93,6 +101,8 @@ export default function Payments() {
   async function pay(e: React.FormEvent) {
     e.preventDefault();
     setMsg('');
+    setReceipt(null);
+    setReceiptAllocations([]);
 
     const paymentAmount = Number(amount);
 
@@ -106,8 +116,34 @@ export default function Payments() {
       return;
     }
 
-    if (paymentAmount > due) {
+    if (paymentAmount > totalDue) {
       setMsg('মোট বকেয়ার চেয়ে বেশি টাকা জমা দেওয়া যাবে না।');
+      return;
+    }
+
+    // প্রথমে পুরোনো মাসের বকেয়া পরিশোধ হবে
+    let remainingPayment = paymentAmount;
+    const allocations: any[] = [];
+
+    for (const d of studentDues) {
+      if (remainingPayment <= 0) break;
+      if (d.remaining <= 0) continue;
+
+      const allocated = Math.min(remainingPayment, d.remaining);
+
+      allocations.push({
+        student_id: student,
+        amount: allocated,
+        fee_month: d.month + '-01',
+        method,
+        note
+      });
+
+      remainingPayment -= allocated;
+    }
+
+    if (!allocations.length) {
+      setMsg('কোনো বকেয়া পাওয়া যায়নি।');
       return;
     }
 
@@ -115,15 +151,8 @@ export default function Payments() {
 
     const { data, error } = await supabase()
       .from('payments')
-      .insert({
-        student_id: student,
-        amount: paymentAmount,
-        fee_month: month + '-01',
-        method,
-        note
-      })
-      .select('*,students(name,student_code)')
-      .single();
+      .insert(allocations)
+      .select('*,students(name,student_code)');
 
     setBusy(false);
 
@@ -132,7 +161,20 @@ export default function Payments() {
       return;
     }
 
-    setReceipt(data);
+    setReceipt({
+      id: data?.[0]?.id,
+      students: data?.[0]?.students,
+      amount: paymentAmount,
+      method,
+      note,
+      paid_at: data?.[0]?.paid_at || new Date().toISOString()
+    });
+
+    setReceiptAllocations(allocations.map(a => ({
+      month: String(a.fee_month).slice(0, 7),
+      amount: a.amount
+    })));
+
     setAmount('');
     setNote('');
     setMsg('পেমেন্ট সফলভাবে সংরক্ষণ হয়েছে।');
@@ -148,13 +190,9 @@ export default function Payments() {
     <>
       <style>{`
         @media print {
-          body * {
-            visibility: hidden !important;
-          }
+          body * { visibility: hidden !important; }
           #payment-receipt,
-          #payment-receipt * {
-            visibility: visible !important;
-          }
+          #payment-receipt * { visibility: visible !important; }
           #payment-receipt {
             position: absolute;
             left: 0;
@@ -164,9 +202,7 @@ export default function Payments() {
             background: white;
             color: black;
           }
-          .no-print {
-            display: none !important;
-          }
+          .no-print { display: none !important; }
         }
       `}</style>
 
@@ -174,7 +210,7 @@ export default function Payments() {
         <div>
           <h1>পেমেন্ট ও মাসিক আয়</h1>
           <div className="muted">
-            মাসভিত্তিক বকেয়া, Add Due ও ফি আদায়
+            মাসভিত্তিক বকেয়া ও পেমেন্ট ব্যবস্থাপনা
           </div>
         </div>
       </div>
@@ -213,7 +249,7 @@ export default function Payments() {
                 setMsg('');
               }}
             >
-              <option value="">শিক্ষার্থী নির্বাচন</option>
+              <option value="">শিক্ষার্থী নির্বাচন করুন</option>
               {students.map(s => (
                 <option value={s.id} key={s.id}>
                   {s.name} — {s.student_code}
@@ -221,50 +257,81 @@ export default function Payments() {
               ))}
             </select>
           </div>
-
-          <div className="field">
-            <label>বকেয়া মাস নির্বাচন</label>
-            <input
-              type="month"
-              required
-              value={month}
-              onChange={e => {
-                setMonth(e.target.value);
-                setAmount('');
-                setReceipt(null);
-                setMsg('');
-              }}
-            />
-          </div>
         </div>
 
         {selectedStudent && (
-          <div className="panel" style={{ marginTop: 15 }}>
-            <h3>মাসিক হিসাব</h3>
+          <>
+            <div className="panel" style={{ marginTop: 15 }}>
+              <h3>শিক্ষার্থীর তথ্য</h3>
+              <p>নাম: {selectedStudent.name}</p>
+              <p>Student ID: {selectedStudent.student_code}</p>
+              <p>কোর্স: {selectedStudent.program}</p>
 
-            <p>শিক্ষার্থী: {selectedStudent.name}</p>
-            <p>নির্বাচিত মাস: {month}</p>
-            <p>
-              মাসিক ফি: ৳ {monthlyFee.toLocaleString('en-BD')}
-            </p>
-            <p>
-              Add Due: ৳ {manualDue.toLocaleString('en-BD')}
-            </p>
-            <p>
-              মোট ফি ও অতিরিক্ত বকেয়া: ৳ {totalFee.toLocaleString('en-BD')}
-            </p>
-            <p>
-              আগে জমা: ৳ {paid.toLocaleString('en-BD')}
-            </p>
+              <div className="grid">
+                <div className="card">
+                  <div className="stat-label">মোট বকেয়া</div>
+                  <div className="stat-value" style={{ color: '#dc2626' }}>
+                    ৳ {totalOriginal.toLocaleString('en-BD')}
+                  </div>
+                </div>
 
-            <h3 style={{ color: '#dc2626' }}>
-              বর্তমান বকেয়া: ৳ {due.toLocaleString('en-BD')}
-            </h3>
+                <div className="card">
+                  <div className="stat-label">মোট জমা</div>
+                  <div className="stat-value">
+                    ৳ {totalPaid.toLocaleString('en-BD')}
+                  </div>
+                </div>
 
-            {due === 0 && (
-              <p>এই মাসের সম্পূর্ণ টাকা পরিশোধ হয়েছে।</p>
-            )}
-          </div>
+                <div className="card">
+                  <div className="stat-label">বর্তমান অবশিষ্ট</div>
+                  <div className="stat-value" style={{ color: '#dc2626' }}>
+                    ৳ {totalDue.toLocaleString('en-BD')}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="panel section">
+              <h3>মাসভিত্তিক বকেয়ার তালিকা</h3>
+
+              <div className="tablewrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>মাস</th>
+                      <th>মোট বকেয়া</th>
+                      <th>জমা</th>
+                      <th>অবশিষ্ট</th>
+                      <th>অবস্থা</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {studentDues.map(d => (
+                      <tr key={d.id}>
+                        <td>{d.month}</td>
+                        <td>৳ {d.total.toLocaleString('en-BD')}</td>
+                        <td>৳ {d.paid.toLocaleString('en-BD')}</td>
+                        <td>৳ {d.remaining.toLocaleString('en-BD')}</td>
+                        <td>
+                          {d.remaining === 0
+                            ? 'Paid'
+                            : d.paid > 0
+                              ? 'Partial Paid'
+                              : 'Due'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                {!studentDues.length && (
+                  <div className="empty">
+                    এই শিক্ষার্থীর কোনো Add Due পাওয়া যায়নি।
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
         )}
 
         <div className="formgrid" style={{ marginTop: 15 }}>
@@ -272,13 +339,14 @@ export default function Payments() {
             <label>জমার পরিমাণ (টাকা)</label>
             <input
               type="number"
-              min="1"
-              max={due}
+              min="0.01"
+              step="0.01"
+              max={totalDue}
               required
               value={amount}
               onChange={e => setAmount(e.target.value)}
               placeholder="টাকার পরিমাণ লিখুন"
-              disabled={!student || due <= 0}
+              disabled={!student || totalDue <= 0}
             />
           </div>
 
@@ -309,7 +377,7 @@ export default function Payments() {
 
         <button
           className="btn"
-          disabled={busy || !student || due <= 0}
+          disabled={busy || !student || totalDue <= 0}
           style={{ marginTop: 16 }}
         >
           {busy ? 'সংরক্ষণ হচ্ছে...' : 'পেমেন্ট সংরক্ষণ'}
@@ -329,15 +397,22 @@ export default function Payments() {
           <p><b>Receipt No:</b> {receipt.id}</p>
           <p><b>শিক্ষার্থীর নাম:</b> {receipt.students?.name}</p>
           <p><b>Student ID:</b> {receipt.students?.student_code}</p>
-          <p><b>ফি মাস:</b> {String(receipt.fee_month).slice(0, 7)}</p>
           <p>
             <b>জমার তারিখ:</b>{' '}
-            {new Date(receipt.paid_at || Date.now()).toLocaleDateString('bn-BD')}
+            {new Date(receipt.paid_at).toLocaleDateString('bn-BD')}
           </p>
           <p><b>পেমেন্ট পদ্ধতি:</b> {receipt.method}</p>
           <p>
-            <b>জমার পরিমাণ:</b> ৳ {Number(receipt.amount).toLocaleString('en-BD')}
+            <b>মোট জমা:</b> ৳ {Number(receipt.amount).toLocaleString('en-BD')}
           </p>
+
+          <h3>যে মাসগুলোর বকেয়া সমন্বয় হয়েছে</h3>
+          {receiptAllocations.map((a, i) => (
+            <p key={i}>
+              {a.month}: ৳ {Number(a.amount).toLocaleString('en-BD')}
+            </p>
+          ))}
+
           <p><b>নোট:</b> {receipt.note || '—'}</p>
 
           <hr />
@@ -379,7 +454,6 @@ export default function Payments() {
                 <th>পরিমাণ</th>
               </tr>
             </thead>
-
             <tbody>
               {rows.map(p => (
                 <tr key={p.id}>
@@ -391,9 +465,7 @@ export default function Payments() {
                       : '—'}
                   </td>
                   <td>{p.method}</td>
-                  <td>
-                    ৳ {Number(p.amount).toLocaleString('en-BD')}
-                  </td>
+                  <td>৳ {Number(p.amount).toLocaleString('en-BD')}</td>
                 </tr>
               ))}
             </tbody>
