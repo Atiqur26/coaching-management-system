@@ -8,7 +8,8 @@ const programs = [
   'Mathematics 1st Year',
   'Mathematics 2nd Year',
   'Honours 1st Year',
-  'Honours 2nd Year'
+  'Honours 2nd Year',
+  'Computer'
 ];
 
 export default function NewStudent() {
@@ -35,12 +36,18 @@ export default function NewStudent() {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('subjects')
         .select('id,name,monthly_fee')
         .eq('program', f.program)
         .eq('active', true)
         .order('name');
+
+      if (error) {
+        setMsg(error.message);
+        setSubjects([]);
+        return;
+      }
 
       setSubjects(data || []);
       setSelected([]);
@@ -85,7 +92,10 @@ export default function NewStudent() {
 
       if (enrollError) {
         setBusy(false);
-        setMsg('শিক্ষার্থী তৈরি হয়েছে, কিন্তু Subject enrollment সম্পূর্ণ হয়নি: ' + enrollError.message);
+        setMsg(
+          'শিক্ষার্থী তৈরি হয়েছে, কিন্তু Subject enrollment সম্পূর্ণ হয়নি: ' +
+          enrollError.message
+        );
         return;
       }
     }
@@ -144,7 +154,9 @@ export default function NewStudent() {
               onChange={e => change('program', e.target.value)}
             >
               {programs.map(x => (
-                <option key={x}>{x}</option>
+                <option key={x} value={x}>
+                  {x}
+                </option>
               ))}
             </select>
           </div>
