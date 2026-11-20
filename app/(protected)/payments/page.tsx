@@ -18,25 +18,21 @@ export default function Payments() {
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [receipt, setReceipt] = useState<any>(null);
-
   const [selectedPaymentIds, setSelectedPaymentIds] = useState<any[]>([]);
   const [printPending, setPrintPending] = useState(false);
 
   async function load() {
     const [studentRes, paymentRes, dueRes] = await Promise.all([
-      supabase
-        .from('students')
+      supabase.from('students')
         .select('id,name,student_code,program,monthly_fee')
         .eq('active', true)
         .order('name'),
 
-      supabase
-        .from('payments')
+      supabase.from('payments')
         .select('*,students(name,student_code)')
         .order('paid_at', { ascending: false }),
 
-      supabase
-        .from('student_dues')
+      supabase.from('student_dues')
         .select('*')
         .order('due_month', { ascending: true })
     ]);
@@ -61,10 +57,7 @@ export default function Payments() {
     setDues(dueRes.data || []);
 
     const validIds = (paymentRes.data || []).map((p: any) => p.id);
-
-    setSelectedPaymentIds(prev =>
-      prev.filter(id => validIds.includes(id))
-    );
+    setSelectedPaymentIds(prev => prev.filter(id => validIds.includes(id)));
   }
 
   useEffect(() => {
@@ -87,13 +80,11 @@ export default function Payments() {
 
   function formatMonth(month: string) {
     const [year, mon] = month.split('-');
-
     const names = [
       'জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল',
       'মে', 'জুন', 'জুলাই', 'আগস্ট',
       'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'
     ];
-
     return `${names[Number(mon) - 1] || mon} ${year}`;
   }
 
@@ -108,10 +99,9 @@ export default function Payments() {
         const month = String(d.due_month).slice(0, 7);
 
         const paid = rows
-          .filter(
-            p =>
-              p.student_id === student &&
-              String(p.fee_month).slice(0, 7) === month
+          .filter(p =>
+            p.student_id === student &&
+            String(p.fee_month).slice(0, 7) === month
           )
           .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
@@ -128,17 +118,9 @@ export default function Payments() {
       .sort((a, b) => a.month.localeCompare(b.month));
   }, [student, dues, rows]);
 
-  const totalOriginal = studentDues.reduce(
-    (sum, d) => sum + d.total, 0
-  );
-
-  const totalPaid = studentDues.reduce(
-    (sum, d) => sum + d.paid, 0
-  );
-
-  const totalDue = studentDues.reduce(
-    (sum, d) => sum + d.remaining, 0
-  );
+  const totalOriginal = studentDues.reduce((sum, d) => sum + d.total, 0);
+  const totalPaid = studentDues.reduce((sum, d) => sum + d.paid, 0);
+  const totalDue = studentDues.reduce((sum, d) => sum + d.remaining, 0);
 
   const allSelected =
     rows.length > 0 &&
@@ -153,24 +135,20 @@ export default function Payments() {
   }
 
   function toggleSelectAll() {
-    if (allSelected) {
-      setSelectedPaymentIds([]);
-    } else {
-      setSelectedPaymentIds(rows.map(p => p.id));
-    }
+    setSelectedPaymentIds(
+      allSelected ? [] : rows.map(p => p.id)
+    );
   }
 
   async function deleteSelectedPayments() {
-    if (selectedPaymentIds.length === 0) {
+    if (!selectedPaymentIds.length) {
       setMsg('প্রথমে Payment নির্বাচন করুন।');
       return;
     }
 
-    const confirmed = window.confirm(
+    if (!window.confirm(
       `আপনি কি ${selectedPaymentIds.length} টি Payment মুছে ফেলতে চান?`
-    );
-
-    if (!confirmed) return;
+    )) return;
 
     setDeleting(true);
     setMsg('');
@@ -188,10 +166,9 @@ export default function Payments() {
 
       setSelectedPaymentIds([]);
       setReceipt(null);
-
       await load();
-
       setMsg('নির্বাচিত Payment Delete হয়েছে।');
+
     } catch (err: any) {
       setMsg(err?.message || 'Payment Delete করতে সমস্যা হয়েছে।');
     } finally {
@@ -229,7 +206,6 @@ export default function Payments() {
     try {
       const previousDue = totalDue;
       let remainingPayment = paymentAmount;
-
       const allocations: any[] = [];
 
       for (const d of studentDues) {
@@ -250,7 +226,7 @@ export default function Payments() {
         remainingPayment -= allocated;
       }
 
-      if (allocations.length === 0) {
+      if (!allocations.length) {
         setMsg('কোনো বকেয়া সমন্বয় করা যায়নি।');
         return;
       }
@@ -308,6 +284,7 @@ export default function Payments() {
       setMsg('পেমেন্ট সফলভাবে গ্রহণ করা হয়েছে।');
 
       await load();
+
     } catch (err: any) {
       setMsg(err?.message || 'একটি সমস্যা হয়েছে।');
     } finally {
@@ -332,14 +309,9 @@ export default function Payments() {
       method: p.method || 'Cash',
       note: p.note || '',
       paid_at: p.paid_at || new Date().toISOString(),
-
       allDueMonths: [
-        {
-          month,
-          total: paymentAmount
-        }
+        { month, total: paymentAmount }
       ],
-
       adjustedMonths: [
         {
           month,
@@ -358,17 +330,10 @@ export default function Payments() {
         .payment-checkbox {
           appearance: auto !important;
           -webkit-appearance: checkbox !important;
-          display: inline-block !important;
-          visibility: visible !important;
-          opacity: 1 !important;
           width: 20px !important;
           height: 20px !important;
-          min-width: 20px !important;
           cursor: pointer !important;
           accent-color: #2563eb;
-          vertical-align: middle;
-          position: relative;
-          z-index: 2;
         }
 
         .payment-select-cell {
@@ -377,7 +342,48 @@ export default function Payments() {
           min-width: 110px;
         }
 
+        .receipt-table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-top: 7px;
+          font-size: 12px;
+        }
+
+        .receipt-table th,
+        .receipt-table td {
+          border: 1px solid #777;
+          padding: 6px;
+          text-align: center;
+        }
+
+        .receipt-table th {
+          background: #eee;
+        }
+
+        .receipt-summary {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 8px;
+          margin: 10px 0;
+        }
+
+        .receipt-summary > div {
+          border: 1px solid #999;
+          padding: 7px;
+        }
+
         @media print {
+          @page {
+            size: A4 portrait;
+            margin: 8mm;
+          }
+
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: white !important;
+          }
+
           body * {
             visibility: hidden !important;
           }
@@ -392,53 +398,64 @@ export default function Payments() {
             left: 0 !important;
             top: 0 !important;
             width: 100% !important;
+            box-sizing: border-box !important;
+            padding: 5mm !important;
+            margin: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
             background: white !important;
             color: black !important;
-            padding: 20px !important;
+            font-size: 11px !important;
+            line-height: 1.2 !important;
           }
 
+          #payment-receipt h2 {
+            font-size: 20px !important;
+            margin: 0 0 4px !important;
+          }
+
+          #payment-receipt h3 {
+            font-size: 13px !important;
+            margin: 6px 0 4px !important;
+          }
+
+          #payment-receipt p {
+            margin: 3px 0 !important;
+          }
+
+          #payment-receipt .receipt-summary {
+            gap: 6px !important;
+            margin: 8px 0 !important;
+          }
+
+          #payment-receipt .receipt-summary > div {
+            padding: 6px !important;
+          }
+
+          #payment-receipt .receipt-table {
+            margin-top: 5px !important;
+            font-size: 10px !important;
+          }
+
+          #payment-receipt .receipt-table th,
+          #payment-receipt .receipt-table td {
+            padding: 4px !important;
+          }
+
+          #payment-receipt .no-print,
           .no-print {
             display: none !important;
           }
 
-          @page {
-            size: A4;
-            margin: 15mm;
+          #payment-receipt .signature-area {
+            margin-top: 18px !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
           }
-        }
 
-        .receipt-table {
-          width: 100%;
-          border-collapse: collapse;
-          margin-top: 12px;
-        }
-
-        .receipt-table th,
-        .receipt-table td {
-          border: 1px solid #777;
-          padding: 8px;
-          text-align: center;
-        }
-
-        .receipt-table th {
-          background: #eee;
-        }
-
-        .receipt-summary {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 12px;
-          margin: 18px 0;
-        }
-
-        .receipt-summary > div {
-          border: 1px solid #999;
-          padding: 10px;
-        }
-
-        @media print {
-          .receipt-table th {
-            print-color-adjust: exact;
+          * {
+            print-color-adjust: exact !important;
+            -webkit-print-color-adjust: exact !important;
           }
         }
       `}</style>
@@ -653,9 +670,7 @@ export default function Payments() {
             </tbody>
           </table>
 
-          <h3 style={{ marginTop: 25 }}>
-            ২। যে মাসগুলোর বকেয়া সমন্বয় হয়েছে
-          </h3>
+          <h3>২। যে মাসগুলোর বকেয়া সমন্বয় হয়েছে</h3>
 
           <table className="receipt-table">
             <thead>
@@ -678,17 +693,17 @@ export default function Payments() {
           </table>
 
           {receipt.note && (
-            <p style={{ marginTop: 15 }}>
+            <p style={{ marginTop: 10 }}>
               <strong>নোট:</strong> {receipt.note}
             </p>
           )}
 
-          {/* Atiq Italic Signature */}
           <div
+            className="signature-area"
             style={{
               display: 'flex',
               justifyContent: 'flex-end',
-              marginTop: 65,
+              marginTop: 35,
               paddingRight: 20
             }}
           >
