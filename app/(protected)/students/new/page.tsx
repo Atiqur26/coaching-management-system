@@ -35,7 +35,7 @@ export default function NewStudent() {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase()
+      const { data } = await supabase
         .from('subjects')
         .select('id,name,monthly_fee')
         .eq('program', f.program)
