@@ -73,7 +73,7 @@ export default function NewStudent() {
     }
 
     if (selected.length) {
-      const { error: enrollError } = await supabase()
+      const { error: enrollError } = await supabase
         .from('student_subjects')
         .insert(
           chosen.map(x => ({
