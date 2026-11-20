@@ -1,217 +1,271 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
 export default function Payments() {
   const [students, setStudents] = useState<any[]>([]);
   const [rows, setRows] = useState<any[]>([]);
   const [dues, setDues] = useState<any[]>([]);
+
   const [student, setStudent] = useState('');
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('Cash');
   const [note, setNote] = useState('');
+
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [receipt, setReceipt] = useState<any>(null);
-  const [receiptAllocations, setReceiptAllocations] = useState<any[]>([]);
 
+  // শিক্ষার্থী, পেমেন্ট ও Add Due লোড
   async function load() {
-    const db = supabase();
-
-    const [
-      { data: s, error: se },
-      { data: p, error: pe },
-      { data: d, error: de }
-    ] = await Promise.all([
-      db.from('students')
+    const [studentRes, paymentRes, dueRes] = await Promise.all([
+      supabase
+        .from('students')
         .select('id,name,student_code,program,monthly_fee')
         .eq('active', true)
         .order('name'),
 
-      db.from('payments')
+      supabase
+        .from('payments')
         .select('*,students(name,student_code)')
         .order('paid_at', { ascending: false }),
 
-      db.from('student_dues')
+      supabase
+        .from('student_dues')
         .select('*')
         .order('due_month', { ascending: true })
     ]);
 
-    if (se || pe || de) {
-      setMsg(
-        se?.message || pe?.message || de?.message ||
-        'তথ্য লোড হয়নি'
-      );
+    if (studentRes.error) {
+      setMsg('শিক্ষার্থীর তথ্য লোড করা যায়নি: ' + studentRes.error.message);
       return;
     }
 
-    setStudents(s || []);
-    setRows(p || []);
-    setDues(d || []);
+    if (paymentRes.error) {
+      setMsg('পেমেন্টের তথ্য লোড করা যায়নি: ' + paymentRes.error.message);
+      return;
+    }
+
+    if (dueRes.error) {
+      setMsg('বকেয়ার তথ্য লোড করা যায়নি: ' + dueRes.error.message);
+      return;
+    }
+
+    setStudents(studentRes.data || []);
+    setRows(paymentRes.data || []);
+    setDues(dueRes.data || []);
   }
 
   useEffect(() => {
     load();
   }, []);
 
-  const selectedStudent = students.find(s => s.id === student);
+  // নির্বাচিত শিক্ষার্থীর মাসভিত্তিক বকেয়া
+  const studentDues = useMemo(() => {
+    if (!student) return [];
 
-  // শিক্ষার্থীর সব মাসের বকেয়া হিসাব
-  const studentDues = dues
-    .filter(d => d.student_id === student)
-    .map(d => {
-      const month = String(d.due_month).slice(0, 7);
+    return dues
+      .filter((d) => d.student_id === student)
+      .map((d) => {
+        const month = String(d.due_month).slice(0, 7);
 
-      const paid = rows
-        .filter(p =>
-          p.student_id === student &&
-          String(p.fee_month).slice(0, 7) === month
-        )
-        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+        const paid = rows
+          .filter(
+            (p) =>
+              p.student_id === student &&
+              String(p.fee_month).slice(0, 7) === month
+          )
+          .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-      const total = Number(d.amount || 0);
+        const total = Number(d.amount || 0);
+        const remaining = Math.max(0, total - paid);
 
-      return {
-        ...d,
-        month,
-        total,
-        paid,
-        remaining: Math.max(0, total - paid)
-      };
-    })
-    .sort((a, b) => a.month.localeCompare(b.month));
-
-  const totalDue = studentDues.reduce(
-    (sum, d) => sum + d.remaining, 0
-  );
+        return {
+          id: d.id,
+          month,
+          total,
+          paid,
+          remaining
+        };
+      })
+      .sort((a, b) => a.month.localeCompare(b.month));
+  }, [student, dues, rows]);
 
   const totalOriginal = studentDues.reduce(
-    (sum, d) => sum + d.total, 0
+    (sum, d) => sum + d.total,
+    0
   );
 
   const totalPaid = studentDues.reduce(
-    (sum, d) => sum + d.paid, 0
+    (sum, d) => sum + d.paid,
+    0
   );
 
-  const income = rows.reduce(
-    (sum, p) => sum + Number(p.amount || 0), 0
+  const totalDue = studentDues.reduce(
+    (sum, d) => sum + d.remaining,
+    0
   );
 
-  const currentMonth = new Date().toISOString().slice(0, 7);
+  const selectedStudent = students.find((s) => s.id === student);
 
-  const thisMonth = rows.filter(p =>
-    p.paid_at?.slice(0, 7) === currentMonth
-  ).reduce((sum, p) => sum + Number(p.amount || 0), 0);
-
-  async function pay(e: React.FormEvent) {
-    e.preventDefault();
-
+  // টাকা জমা
+  async function pay() {
     setMsg('');
-    setReceipt(null);
-    setReceiptAllocations([]);
-
-    const paymentAmount = Number(amount);
 
     if (!student) {
-      setMsg('শিক্ষার্থী নির্বাচন করুন।');
+      setMsg('প্রথমে শিক্ষার্থী নির্বাচন করুন।');
       return;
     }
 
-    if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+    const paymentAmount = Number(amount);
+
+    if (!paymentAmount || paymentAmount <= 0) {
       setMsg('সঠিক টাকার পরিমাণ লিখুন।');
       return;
     }
 
     if (paymentAmount > totalDue) {
-      setMsg('মোট বকেয়ার চেয়ে বেশি টাকা জমা দেওয়া যাবে না।');
+      setMsg('জমার পরিমাণ মোট বকেয়ার চেয়ে বেশি হতে পারবে না।');
       return;
     }
 
-    // পেমেন্টের আগের বকেয়া সংরক্ষণ
-    const previousDue = totalDue;
-
-    // পুরোনো মাসের বকেয়া আগে সমন্বয় হবে
-    let remainingPayment = paymentAmount;
-    const allocations: any[] = [];
-
-    for (const d of studentDues) {
-      if (remainingPayment <= 0) break;
-      if (d.remaining <= 0) continue;
-
-      const allocated = Math.min(
-        remainingPayment,
-        d.remaining
-      );
-
-      allocations.push({
-        student_id: student,
-        amount: allocated,
-        fee_month: d.month + '-01',
-        method,
-        note
-      });
-
-      remainingPayment -= allocated;
-    }
-
-    if (!allocations.length) {
-      setMsg('কোনো বকেয়া পাওয়া যায়নি।');
+    if (totalDue <= 0) {
+      setMsg('এই শিক্ষার্থীর কোনো বকেয়া নেই।');
       return;
     }
 
     setBusy(true);
 
-    const { data, error } = await supabase()
-      .from('payments')
-      .insert(allocations)
-      .select('*,students(name,student_code)');
+    try {
+      const previousDue = totalDue;
+      let remainingPayment = paymentAmount;
 
-    setBusy(false);
+      // পুরোনো মাসের বকেয়া আগে সমন্বয়
+      const allocations: any[] = [];
 
-    if (error) {
-      setMsg(error.message);
-      return;
+      for (const d of studentDues) {
+        if (remainingPayment <= 0) break;
+
+        if (d.remaining <= 0) continue;
+
+        const allocated = Math.min(
+          remainingPayment,
+          d.remaining
+        );
+
+        allocations.push({
+          student_id: student,
+          amount: allocated,
+          fee_month: d.month + '-01',
+          method,
+          note: note || null,
+          paid_at: new Date().toISOString()
+        });
+
+        remainingPayment -= allocated;
+      }
+
+      if (allocations.length === 0) {
+        setMsg('কোনো বকেয়া সমন্বয় করা যায়নি।');
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('payments')
+        .insert(allocations)
+        .select('*,students(name,student_code)');
+
+      if (error) {
+        setMsg('পেমেন্ট সংরক্ষণ করা যায়নি: ' + error.message);
+        return;
+      }
+
+      const remainingDue = Math.max(
+        0,
+        previousDue - paymentAmount
+      );
+
+      // সব মাসের বিবরণ তৈরি
+      // আজ টাকা না দিলেও মাসটি রসিদে থাকবে
+      const monthlyDetails = studentDues.map((d) => {
+        const allocated = allocations
+          .filter(
+            (a) =>
+              String(a.fee_month).slice(0, 7) === d.month
+          )
+          .reduce(
+            (sum, a) => sum + Number(a.amount || 0),
+            0
+          );
+
+        return {
+          month: d.month,
+          total: d.total,
+          paidBefore: d.paid,
+          todayPaid: allocated,
+          remaining: Math.max(0, d.remaining - allocated)
+        };
+      });
+
+      setReceipt({
+        id: data?.[0]?.id,
+        students: data?.[0]?.students || selectedStudent,
+        amount: paymentAmount,
+        totalDueBefore: previousDue,
+        totalDueAfter: remainingDue,
+        method,
+        note,
+        paid_at: data?.[0]?.paid_at || new Date().toISOString(),
+        monthlyDetails
+      });
+
+      setAmount('');
+      setNote('');
+      setMsg('পেমেন্ট সফলভাবে গ্রহণ করা হয়েছে।');
+
+      await load();
+    } catch (err: any) {
+      setMsg(err?.message || 'একটি সমস্যা হয়েছে।');
+    } finally {
+      setBusy(false);
     }
-
-    // পেমেন্টের পর অবশিষ্ট বকেয়া
-    const remainingDue = Math.max(
-      0,
-      previousDue - paymentAmount
-    );
-
-    setReceipt({
-      id: data?.[0]?.id,
-      students: data?.[0]?.students,
-      amount: paymentAmount,
-      totalDueBefore: previousDue,
-      totalDueAfter: remainingDue,
-      method,
-      note,
-      paid_at: data?.[0]?.paid_at || new Date().toISOString()
-    });
-
-    setReceiptAllocations(
-      allocations.map(a => ({
-        month: String(a.fee_month).slice(0, 7),
-        amount: a.amount
-      }))
-    );
-
-    setAmount('');
-    setNote('');
-    setMsg('পেমেন্ট সফলভাবে সংরক্ষণ হয়েছে।');
-
-    await load();
   }
 
   function downloadPDF() {
     window.print();
   }
 
+  function formatMoney(value: number) {
+    return Number(value || 0).toLocaleString('en-BD', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  }
+
+  function formatMonth(month: string) {
+    const [year, mon] = month.split('-');
+    const names = [
+      'জানুয়ারি',
+      'ফেব্রুয়ারি',
+      'মার্চ',
+      'এপ্রিল',
+      'মে',
+      'জুন',
+      'জুলাই',
+      'আগস্ট',
+      'সেপ্টেম্বর',
+      'অক্টোবর',
+      'নভেম্বর',
+      'ডিসেম্বর'
+    ];
+
+    return `${names[Number(mon) - 1] || mon} ${year}`;
+  }
+
   return (
-    <>
-      <style>{`
+    <div>
+      <style jsx global>{`
         @media print {
           body * {
             visibility: hidden !important;
@@ -223,360 +277,374 @@ export default function Payments() {
           }
 
           #payment-receipt {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            padding: 25px;
-            background: white;
-            color: black;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            background: white !important;
+            color: black !important;
+            padding: 20px !important;
           }
 
           .no-print {
             display: none !important;
+          }
+
+          @page {
+            size: A4;
+            margin: 15mm;
+          }
+        }
+
+        .receipt-table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-top: 12px;
+        }
+
+        .receipt-table th,
+        .receipt-table td {
+          border: 1px solid #777;
+          padding: 8px;
+          text-align: center;
+        }
+
+        .receipt-table th {
+          background: #f1f1f1;
+        }
+
+        .receipt-summary {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 12px;
+          margin: 18px 0;
+        }
+
+        .receipt-summary > div {
+          border: 1px solid #999;
+          padding: 10px;
+        }
+
+        @media print {
+          .receipt-table th {
+            background: #eee !important;
+            print-color-adjust: exact;
           }
         }
       `}</style>
 
       <div className="pagehead no-print">
         <div>
-          <h1>পেমেন্ট ও মাসিক আয়</h1>
-          <div className="muted">
-            মাসভিত্তিক বকেয়া ও পেমেন্ট ব্যবস্থাপনা
-          </div>
+          <h1>Payment Management</h1>
+          <p className="muted">
+            শিক্ষার্থীর বকেয়া অনুযায়ী টাকা জমা নিন
+          </p>
         </div>
       </div>
 
       <div className="grid no-print">
         <div className="card">
-          <div className="stat-label">সর্বমোট আদায়</div>
+          <div className="stat-label">মোট বকেয়া</div>
           <div className="stat-value">
-            ৳ {income.toLocaleString('en-BD')}
+            ৳ {formatMoney(totalDue)}
           </div>
         </div>
 
         <div className="card">
-          <div className="stat-label">চলতি মাসের আয়</div>
+          <div className="stat-label">মোট বকেয়া নির্ধারিত টাকা</div>
           <div className="stat-value">
-            ৳ {thisMonth.toLocaleString('en-BD')}
+            ৳ {formatMoney(totalOriginal)}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="stat-label">আগে জমা</div>
+          <div className="stat-value">
+            ৳ {formatMoney(totalPaid)}
           </div>
         </div>
       </div>
 
-      <form className="panel section no-print" onSubmit={pay}>
-        <h2 style={{ fontSize: 19, marginTop: 0 }}>
-          নতুন পেমেন্ট যোগ
-        </h2>
+      <div className="panel section no-print">
+        <h2>নতুন পেমেন্ট</h2>
 
         <div className="formgrid">
           <div className="field">
-            <label>শিক্ষার্থী নির্বাচন</label>
+            <label>শিক্ষার্থী নির্বাচন করুন</label>
             <select
-              required
+              className="input"
               value={student}
-              onChange={e => {
+              onChange={(e) => {
                 setStudent(e.target.value);
-                setAmount('');
                 setReceipt(null);
-                setReceiptAllocations([]);
                 setMsg('');
               }}
             >
               <option value="">শিক্ষার্থী নির্বাচন করুন</option>
-
-              {students.map(s => (
-                <option value={s.id} key={s.id}>
-                  {s.name} — {s.student_code}
+              {students.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} {s.student_code ? `(${s.student_code})` : ''}
                 </option>
               ))}
             </select>
           </div>
-        </div>
 
-        {selectedStudent && (
-          <>
-            <div className="panel" style={{ marginTop: 15 }}>
-              <h3>শিক্ষার্থীর তথ্য</h3>
-
-              <p>নাম: {selectedStudent.name}</p>
-              <p>Student ID: {selectedStudent.student_code}</p>
-              <p>কোর্স: {selectedStudent.program}</p>
-
-              <div className="grid">
-                <div className="card">
-                  <div className="stat-label">
-                    মোট বকেয়া
-                  </div>
-                  <div
-                    className="stat-value"
-                    style={{ color: '#dc2626' }}
-                  >
-                    ৳ {totalOriginal.toLocaleString('en-BD')}
-                  </div>
-                </div>
-
-                <div className="card">
-                  <div className="stat-label">
-                    মোট জমা
-                  </div>
-                  <div className="stat-value">
-                    ৳ {totalPaid.toLocaleString('en-BD')}
-                  </div>
-                </div>
-
-                <div className="card">
-                  <div className="stat-label">
-                    বর্তমান অবশিষ্ট
-                  </div>
-                  <div
-                    className="stat-value"
-                    style={{ color: '#dc2626' }}
-                  >
-                    ৳ {totalDue.toLocaleString('en-BD')}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="panel section">
-              <h3>মাসভিত্তিক বকেয়ার তালিকা</h3>
-
-              <div className="tablewrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>মাস</th>
-                      <th>মোট বকেয়া</th>
-                      <th>জমা</th>
-                      <th>অবশিষ্ট</th>
-                      <th>অবস্থা</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {studentDues.map(d => (
-                      <tr key={d.id}>
-                        <td>{d.month}</td>
-                        <td>
-                          ৳ {d.total.toLocaleString('en-BD')}
-                        </td>
-                        <td>
-                          ৳ {d.paid.toLocaleString('en-BD')}
-                        </td>
-                        <td>
-                          ৳ {d.remaining.toLocaleString('en-BD')}
-                        </td>
-                        <td>
-                          {d.remaining === 0
-                            ? 'Paid'
-                            : d.paid > 0
-                              ? 'Partial Paid'
-                              : 'Due'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-
-                {!studentDues.length && (
-                  <div className="empty">
-                    এই শিক্ষার্থীর কোনো Add Due পাওয়া যায়নি।
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
-        )}
-
-        <div className="formgrid" style={{ marginTop: 15 }}>
           <div className="field">
-            <label>জমার পরিমাণ (টাকা)</label>
+            <label>জমার পরিমাণ</label>
             <input
               type="number"
-              min="0.01"
+              min="0"
               step="0.01"
-              max={totalDue}
-              required
+              className="input"
               value={amount}
-              onChange={e => setAmount(e.target.value)}
+              onChange={(e) => setAmount(e.target.value)}
               placeholder="টাকার পরিমাণ লিখুন"
-              disabled={!student || totalDue <= 0}
             />
           </div>
 
           <div className="field">
             <label>পেমেন্ট পদ্ধতি</label>
             <select
+              className="input"
               value={method}
-              onChange={e => setMethod(e.target.value)}
+              onChange={(e) => setMethod(e.target.value)}
             >
-              <option>Cash</option>
-              <option>bKash</option>
-              <option>Nagad</option>
-              <option>Bank</option>
-              <option>Rocket</option>
+              <option value="Cash">Cash</option>
+              <option value="Bkash">Bkash</option>
+              <option value="Nagad">Nagad</option>
+              <option value="Bank">Bank</option>
+              <option value="Other">Other</option>
             </select>
           </div>
 
-          <div className="field full">
-            <label>নোট / ট্রানজেকশন আইডি</label>
+          <div className="field">
+            <label>নোট</label>
             <input
+              className="input"
               value={note}
-              onChange={e => setNote(e.target.value)}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="প্রয়োজনীয় নোট"
             />
           </div>
         </div>
 
-        {msg && (
-          <div className="notice">{msg}</div>
-        )}
+        {msg && <div className="notice">{msg}</div>}
 
         <button
           className="btn"
-          disabled={
-            busy ||
-            !student ||
-            totalDue <= 0 ||
-            !amount ||
-            Number(amount) <= 0 ||
-            Number(amount) > totalDue
-          }
-          style={{ marginTop: 16 }}
+          onClick={pay}
+          disabled={busy}
         >
-          {busy ? 'সংরক্ষণ হচ্ছে...' : 'পেমেন্ট সংরক্ষণ'}
+          {busy ? 'অপেক্ষা করুন...' : 'টাকা জমা দিন'}
         </button>
-      </form>
+      </div>
+
+      {student && (
+        <div className="panel section no-print">
+          <h2>মাসভিত্তিক বকেয়ার তালিকা</h2>
+
+          <div className="tablewrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>মাস</th>
+                  <th>মোট বকেয়া</th>
+                  <th>আগে জমা</th>
+                  <th>অবশিষ্ট</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {studentDues.map((d) => (
+                  <tr key={d.id}>
+                    <td>{formatMonth(d.month)}</td>
+                    <td>৳ {formatMoney(d.total)}</td>
+                    <td>৳ {formatMoney(d.paid)}</td>
+                    <td>৳ {formatMoney(d.remaining)}</td>
+                  </tr>
+                ))}
+
+                {studentDues.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="empty">
+                      এই শিক্ষার্থীর কোনো Add Due পাওয়া যায়নি।
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+
+              {studentDues.length > 0 && (
+                <tfoot>
+                  <tr>
+                    <th>সর্বমোট</th>
+                    <th>৳ {formatMoney(totalOriginal)}</th>
+                    <th>৳ {formatMoney(totalPaid)}</th>
+                    <th>৳ {formatMoney(totalDue)}</th>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </div>
+      )}
 
       {receipt && (
         <div className="panel section" id="payment-receipt">
           <div style={{ textAlign: 'center' }}>
-            <h2>COACHING MANAGEMENT</h2>
-            <h3>মানি রিসিট / MONEY RECEIPT</h3>
-            <p>পেমেন্ট রসিদ</p>
+            <h2>PAYMENT RECEIPT</h2>
+            <h3>কোচিং সেন্টার</h3>
+            <p>টাকা জমার রসিদ</p>
           </div>
 
           <hr />
 
           <p>
-            <b>Receipt No:</b> {receipt.id}
+            <strong>রসিদ নং:</strong> {receipt.id || 'N/A'}
           </p>
 
           <p>
-            <b>শিক্ষার্থীর নাম:</b> {receipt.students?.name}
+            <strong>শিক্ষার্থীর নাম:</strong>{' '}
+            {receipt.students?.name || selectedStudent?.name || ''}
           </p>
 
           <p>
-            <b>Student ID:</b> {receipt.students?.student_code}
+            <strong>শিক্ষার্থী আইডি:</strong>{' '}
+            {receipt.students?.student_code || selectedStudent?.student_code || ''}
           </p>
 
           <p>
-            <b>জমার তারিখ:</b>{' '}
-            {new Date(receipt.paid_at).toLocaleDateString('bn-BD')}
+            <strong>তারিখ:</strong>{' '}
+            {new Date(receipt.paid_at).toLocaleString('en-BD')}
           </p>
 
           <p>
-            <b>পেমেন্ট পদ্ধতি:</b> {receipt.method}
+            <strong>পেমেন্ট পদ্ধতি:</strong> {receipt.method}
           </p>
 
-          <hr />
+          <div className="receipt-summary">
+            <div>
+              <strong>জমার আগে মোট বকেয়া</strong>
+              <h3>৳ {formatMoney(receipt.totalDueBefore)}</h3>
+            </div>
 
-          <h3>বকেয়া ও পেমেন্টের হিসাব</h3>
+            <div>
+              <strong>আজ জমা</strong>
+              <h3>৳ {formatMoney(receipt.amount)}</h3>
+            </div>
 
-          <p>
-            <b>পেমেন্টের আগের মোট বকেয়া:</b>
-            {' '}৳ {Number(receipt.totalDueBefore).toLocaleString('en-BD')}
-          </p>
+            <div>
+              <strong>জমার পরে অবশিষ্ট বকেয়া</strong>
+              <h3>৳ {formatMoney(receipt.totalDueAfter)}</h3>
+            </div>
 
-          <p>
-            <b>আজ জমা:</b>
-            {' '}৳ {Number(receipt.amount).toLocaleString('en-BD')}
-          </p>
+            <div>
+              <strong>পেমেন্ট পদ্ধতি</strong>
+              <h3>{receipt.method}</h3>
+            </div>
+          </div>
 
-          <h3 style={{ color: '#dc2626' }}>
-            পেমেন্টের পর মোট বকেয়া:
-            {' '}৳ {Number(receipt.totalDueAfter).toLocaleString('en-BD')}
-          </h3>
+          <h3>মাসভিত্তিক সম্পূর্ণ বকেয়ার বিবরণ</h3>
 
-          <hr />
+          <div className="tablewrap">
+            <table className="receipt-table">
+              <thead>
+                <tr>
+                  <th>মাস</th>
+                  <th>মোট বকেয়া</th>
+                  <th>আগে জমা</th>
+                  <th>আজ জমা</th>
+                  <th>অবশিষ্ট</th>
+                </tr>
+              </thead>
 
-          <h3>যে মাসগুলোর বকেয়া সমন্বয় হয়েছে</h3>
+              <tbody>
+                {receipt.monthlyDetails.map((d: any, i: number) => (
+                  <tr key={i}>
+                    <td>{formatMonth(d.month)}</td>
+                    <td>৳ {formatMoney(d.total)}</td>
+                    <td>৳ {formatMoney(d.paidBefore)}</td>
+                    <td>৳ {formatMoney(d.todayPaid)}</td>
+                    <td>৳ {formatMoney(d.remaining)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-          {receiptAllocations.map((a, i) => (
-            <p key={i}>
-              {a.month}: ৳ {Number(a.amount).toLocaleString('en-BD')}
+          {receipt.note && (
+            <p style={{ marginTop: 15 }}>
+              <strong>নোট:</strong> {receipt.note}
             </p>
-          ))}
+          )}
 
-          <p>
-            <b>নোট:</b> {receipt.note || '—'}
-          </p>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              marginTop: 65,
+              gap: 30
+            }}
+          >
+            <div style={{ textAlign: 'center' }}>
+              ______________________
+              <p>শিক্ষার্থীর স্বাক্ষর</p>
+            </div>
 
-          <hr />
-
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            marginTop: 55
-          }}>
-            <span>শিক্ষার্থীর স্বাক্ষর</span>
-            <span>কর্তৃপক্ষের স্বাক্ষর</span>
+            <div style={{ textAlign: 'center' }}>
+              ______________________
+              <p>কর্তৃপক্ষের স্বাক্ষর</p>
+            </div>
           </div>
 
           <div className="no-print" style={{ marginTop: 20 }}>
-            <button
-              type="button"
-              className="btn"
-              onClick={downloadPDF}
-            >
-              PDF Download / Print
+            <button className="btn" onClick={downloadPDF}>
+              PDF / Print Download
             </button>
           </div>
         </div>
       )}
 
       <div className="panel section no-print">
-        <h2 style={{ fontSize: 19, marginTop: 0 }}>
-          পেমেন্ট তালিকা
-        </h2>
+        <h2>সাম্প্রতিক পেমেন্ট</h2>
 
         <div className="tablewrap">
           <table className="table">
             <thead>
               <tr>
-                <th>শিক্ষার্থী</th>
-                <th>ফি মাস</th>
                 <th>তারিখ</th>
+                <th>শিক্ষার্থী</th>
+                <th>মাস</th>
+                <th>টাকা</th>
                 <th>পদ্ধতি</th>
-                <th>পরিমাণ</th>
               </tr>
             </thead>
 
             <tbody>
-              {rows.map(p => (
+              {rows.slice(0, 20).map((p) => (
                 <tr key={p.id}>
-                  <td>{p.students?.name}</td>
-                  <td>{String(p.fee_month).slice(0, 7)}</td>
                   <td>
                     {p.paid_at
-                      ? new Date(p.paid_at).toLocaleDateString('bn-BD')
-                      : '—'}
+                      ? new Date(p.paid_at).toLocaleDateString('en-BD')
+                      : ''}
                   </td>
-                  <td>{p.method}</td>
-                  <td>
-                    ৳ {Number(p.amount).toLocaleString('en-BD')}
-                  </td>
+                  <td>{p.students?.name || 'N/A'}</td>
+                  <td>{String(p.fee_month || '').slice(0, 7)}</td>
+                  <td>৳ {formatMoney(Number(p.amount || 0))}</td>
+                  <td>{p.method || ''}</td>
                 </tr>
               ))}
+
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="empty">
+                    এখনো কোনো পেমেন্ট নেই।
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
-
-          {!rows.length && (
-            <div className="empty">
-              কোনো পেমেন্ট নেই।
-            </div>
-          )}
         </div>
       </div>
-    </>
+    </div>
   );
 }
