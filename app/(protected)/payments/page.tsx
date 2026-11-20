@@ -17,7 +17,6 @@ export default function Payments() {
   const [busy, setBusy] = useState(false);
   const [receipt, setReceipt] = useState<any>(null);
 
-  // শিক্ষার্থী, পেমেন্ট ও Add Due লোড
   async function load() {
     const [studentRes, paymentRes, dueRes] = await Promise.all([
       supabase
@@ -38,17 +37,17 @@ export default function Payments() {
     ]);
 
     if (studentRes.error) {
-      setMsg('শিক্ষার্থীর তথ্য লোড করা যায়নি: ' + studentRes.error.message);
+      setMsg('শিক্ষার্থীর তথ্য লোড হয়নি: ' + studentRes.error.message);
       return;
     }
 
     if (paymentRes.error) {
-      setMsg('পেমেন্টের তথ্য লোড করা যায়নি: ' + paymentRes.error.message);
+      setMsg('পেমেন্ট লোড হয়নি: ' + paymentRes.error.message);
       return;
     }
 
     if (dueRes.error) {
-      setMsg('বকেয়ার তথ্য লোড করা যায়নি: ' + dueRes.error.message);
+      setMsg('বকেয়ার তথ্য লোড হয়নি: ' + dueRes.error.message);
       return;
     }
 
@@ -60,6 +59,36 @@ export default function Payments() {
   useEffect(() => {
     load();
   }, []);
+
+  function formatMoney(value: number) {
+    return Number(value || 0).toLocaleString('en-BD', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  }
+
+  function formatMonth(month: string) {
+    const [year, mon] = month.split('-');
+
+    const names = [
+      'জানুয়ারি',
+      'ফেব্রুয়ারি',
+      'মার্চ',
+      'এপ্রিল',
+      'মে',
+      'জুন',
+      'জুলাই',
+      'আগস্ট',
+      'সেপ্টেম্বর',
+      'অক্টোবর',
+      'নভেম্বর',
+      'ডিসেম্বর'
+    ];
+
+    return `${names[Number(mon) - 1] || mon} ${year}`;
+  }
+
+  const selectedStudent = students.find((s) => s.id === student);
 
   // নির্বাচিত শিক্ষার্থীর মাসভিত্তিক বকেয়া
   const studentDues = useMemo(() => {
@@ -76,17 +105,19 @@ export default function Payments() {
               p.student_id === student &&
               String(p.fee_month).slice(0, 7) === month
           )
-          .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+          .reduce(
+            (sum, p) => sum + Number(p.amount || 0),
+            0
+          );
 
         const total = Number(d.amount || 0);
-        const remaining = Math.max(0, total - paid);
 
         return {
           id: d.id,
           month,
           total,
           paid,
-          remaining
+          remaining: Math.max(0, total - paid)
         };
       })
       .sort((a, b) => a.month.localeCompare(b.month));
@@ -106,8 +137,6 @@ export default function Payments() {
     (sum, d) => sum + d.remaining,
     0
   );
-
-  const selectedStudent = students.find((s) => s.id === student);
 
   // টাকা জমা
   async function pay() {
@@ -146,7 +175,6 @@ export default function Payments() {
 
       for (const d of studentDues) {
         if (remainingPayment <= 0) break;
-
         if (d.remaining <= 0) continue;
 
         const allocated = Math.min(
@@ -177,7 +205,7 @@ export default function Payments() {
         .select('*,students(name,student_code)');
 
       if (error) {
-        setMsg('পেমেন্ট সংরক্ষণ করা যায়নি: ' + error.message);
+        setMsg('পেমেন্ট সংরক্ষণ হয়নি: ' + error.message);
         return;
       }
 
@@ -186,27 +214,36 @@ export default function Payments() {
         previousDue - paymentAmount
       );
 
-      // সব মাসের বিবরণ তৈরি
-      // আজ টাকা না দিলেও মাসটি রসিদে থাকবে
-      const monthlyDetails = studentDues.map((d) => {
-        const allocated = allocations
-          .filter(
-            (a) =>
-              String(a.fee_month).slice(0, 7) === d.month
-          )
-          .reduce(
-            (sum, a) => sum + Number(a.amount || 0),
-            0
-          );
+      // Add Due-তে থাকা সব মাসের তালিকা
+      const allDueMonths = studentDues.map((d) => ({
+        month: d.month,
+        total: d.total,
+        paidBefore: d.paid,
+        remainingBefore: d.remaining
+      }));
 
-        return {
-          month: d.month,
-          total: d.total,
-          paidBefore: d.paid,
-          todayPaid: allocated,
-          remaining: Math.max(0, d.remaining - allocated)
-        };
-      });
+      // আজ যেসব মাসে টাকা সমন্বয় হয়েছে শুধু সেই মাস
+      const adjustedMonths = studentDues
+        .map((d) => {
+          const allocated = allocations
+            .filter(
+              (a) =>
+                String(a.fee_month).slice(0, 7) === d.month
+            )
+            .reduce(
+              (sum, a) => sum + Number(a.amount || 0),
+              0
+            );
+
+          return {
+            month: d.month,
+            todayPaid: allocated,
+            total: d.total,
+            paidBefore: d.paid,
+            remaining: Math.max(0, d.remaining - allocated)
+          };
+        })
+        .filter((d) => d.todayPaid > 0);
 
       setReceipt({
         id: data?.[0]?.id,
@@ -217,7 +254,8 @@ export default function Payments() {
         method,
         note,
         paid_at: data?.[0]?.paid_at || new Date().toISOString(),
-        monthlyDetails
+        allDueMonths,
+        adjustedMonths
       });
 
       setAmount('');
@@ -225,6 +263,7 @@ export default function Payments() {
       setMsg('পেমেন্ট সফলভাবে গ্রহণ করা হয়েছে।');
 
       await load();
+
     } catch (err: any) {
       setMsg(err?.message || 'একটি সমস্যা হয়েছে।');
     } finally {
@@ -234,33 +273,6 @@ export default function Payments() {
 
   function downloadPDF() {
     window.print();
-  }
-
-  function formatMoney(value: number) {
-    return Number(value || 0).toLocaleString('en-BD', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
-  }
-
-  function formatMonth(month: string) {
-    const [year, mon] = month.split('-');
-    const names = [
-      'জানুয়ারি',
-      'ফেব্রুয়ারি',
-      'মার্চ',
-      'এপ্রিল',
-      'মে',
-      'জুন',
-      'জুলাই',
-      'আগস্ট',
-      'সেপ্টেম্বর',
-      'অক্টোবর',
-      'নভেম্বর',
-      'ডিসেম্বর'
-    ];
-
-    return `${names[Number(mon) - 1] || mon} ${year}`;
   }
 
   return (
@@ -310,7 +322,7 @@ export default function Payments() {
         }
 
         .receipt-table th {
-          background: #f1f1f1;
+          background: #eee;
         }
 
         .receipt-summary {
@@ -327,7 +339,6 @@ export default function Payments() {
 
         @media print {
           .receipt-table th {
-            background: #eee !important;
             print-color-adjust: exact;
           }
         }
@@ -351,7 +362,7 @@ export default function Payments() {
         </div>
 
         <div className="card">
-          <div className="stat-label">মোট বকেয়া নির্ধারিত টাকা</div>
+          <div className="stat-label">মোট নির্ধারিত বকেয়া</div>
           <div className="stat-value">
             ৳ {formatMoney(totalOriginal)}
           </div>
@@ -381,6 +392,7 @@ export default function Payments() {
               }}
             >
               <option value="">শিক্ষার্থী নির্বাচন করুন</option>
+
               {students.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name} {s.student_code ? `(${s.student_code})` : ''}
@@ -490,6 +502,7 @@ export default function Payments() {
 
       {receipt && (
         <div className="panel section" id="payment-receipt">
+
           <div style={{ textAlign: 'center' }}>
             <h2>PAYMENT RECEIPT</h2>
             <h3>কোচিং সেন্টার</h3>
@@ -504,12 +517,12 @@ export default function Payments() {
 
           <p>
             <strong>শিক্ষার্থীর নাম:</strong>{' '}
-            {receipt.students?.name || selectedStudent?.name || ''}
+            {receipt.students?.name || ''}
           </p>
 
           <p>
             <strong>শিক্ষার্থী আইডি:</strong>{' '}
-            {receipt.students?.student_code || selectedStudent?.student_code || ''}
+            {receipt.students?.student_code || ''}
           </p>
 
           <p>
@@ -543,33 +556,61 @@ export default function Payments() {
             </div>
           </div>
 
-          <h3>মাসভিত্তিক সম্পূর্ণ বকেয়ার বিবরণ</h3>
+          {/* সব Add Due মাসের তালিকা */}
+          <h3>১। যে মাসগুলোর বকেয়া দেওয়া হয়েছে</h3>
 
-          <div className="tablewrap">
-            <table className="receipt-table">
-              <thead>
-                <tr>
-                  <th>মাস</th>
-                  <th>মোট বকেয়া</th>
-                  <th>আগে জমা</th>
-                  <th>আজ জমা</th>
-                  <th>অবশিষ্ট</th>
+          <table className="receipt-table">
+            <thead>
+              <tr>
+                <th>ক্রমিক</th>
+                <th>মাস</th>
+                <th>মোট বকেয়া</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {receipt.allDueMonths.map((d: any, i: number) => (
+                <tr key={i}>
+                  <td>{i + 1}</td>
+                  <td>{formatMonth(d.month)}</td>
+                  <td>৳ {formatMoney(d.total)}</td>
                 </tr>
-              </thead>
+              ))}
+            </tbody>
+          </table>
 
-              <tbody>
-                {receipt.monthlyDetails.map((d: any, i: number) => (
-                  <tr key={i}>
-                    <td>{formatMonth(d.month)}</td>
-                    <td>৳ {formatMoney(d.total)}</td>
-                    <td>৳ {formatMoney(d.paidBefore)}</td>
-                    <td>৳ {formatMoney(d.todayPaid)}</td>
-                    <td>৳ {formatMoney(d.remaining)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {/* আজ যে মাসগুলোতে টাকা সমন্বয় হয়েছে */}
+          <h3 style={{ marginTop: 25 }}>
+            ২। যে মাসগুলোর বকেয়া সমন্বয় হয়েছে
+          </h3>
+
+          <table className="receipt-table">
+            <thead>
+              <tr>
+                <th>ক্রমিক</th>
+                <th>মাস</th>
+                <th>আজ জমা</th>
+                <th>অবশিষ্ট বকেয়া</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {receipt.adjustedMonths.map((d: any, i: number) => (
+                <tr key={i}>
+                  <td>{i + 1}</td>
+                  <td>{formatMonth(d.month)}</td>
+                  <td>৳ {formatMoney(d.todayPaid)}</td>
+                  <td>৳ {formatMoney(d.remaining)}</td>
+                </tr>
+              ))}
+
+              {receipt.adjustedMonths.length === 0 && (
+                <tr>
+                  <td colSpan={4}>কোনো মাস সমন্বয় হয়নি।</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
 
           {receipt.note && (
             <p style={{ marginTop: 15 }}>
