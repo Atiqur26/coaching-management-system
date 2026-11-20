@@ -55,7 +55,7 @@ export default function NewStudent() {
 
     const chosen = subjects.filter(x => selected.includes(x.id));
 
-    const { data, error } = await supabase()
+    const { data, error } = await supabase
       .from('students')
       .insert({
         ...f,
