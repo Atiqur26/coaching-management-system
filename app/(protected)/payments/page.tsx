@@ -15,7 +15,11 @@ export default function Payments() {
 
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [receipt, setReceipt] = useState<any>(null);
+
+  // Payment Select All
+  const [selectedPaymentIds, setSelectedPaymentIds] = useState<any[]>([]);
 
   async function load() {
     const [studentRes, paymentRes, dueRes] = await Promise.all([
@@ -138,6 +142,69 @@ export default function Payments() {
     0
   );
 
+  // Payment Select All
+  const allSelected =
+    rows.length > 0 &&
+    rows.every((p) => selectedPaymentIds.includes(p.id));
+
+  function togglePayment(id: any) {
+    setSelectedPaymentIds((prev) =>
+      prev.includes(id)
+        ? prev.filter((item) => item !== id)
+        : [...prev, id]
+    );
+  }
+
+  function toggleSelectAll() {
+    if (allSelected) {
+      setSelectedPaymentIds([]);
+    } else {
+      setSelectedPaymentIds(rows.map((p) => p.id));
+    }
+  }
+
+  // Selected Payment Delete
+  async function deleteSelectedPayments() {
+    if (selectedPaymentIds.length === 0) {
+      setMsg('প্রথমে Payment নির্বাচন করুন।');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `আপনি কি ${selectedPaymentIds.length} টি Payment মুছে ফেলতে চান? এই কাজের ফলে সংশ্লিষ্ট বকেয়া আবার যোগ হবে।`
+    );
+
+    if (!confirmed) return;
+
+    setDeleting(true);
+    setMsg('');
+
+    try {
+      const { error } = await supabase
+        .from('payments')
+        .delete()
+        .in('id', selectedPaymentIds);
+
+      if (error) {
+        setMsg('Payment Delete হয়নি: ' + error.message);
+        return;
+      }
+
+      setSelectedPaymentIds([]);
+      setReceipt(null);
+
+      await load();
+
+      setMsg(
+        `${selectedPaymentIds.length} টি Payment সফলভাবে Delete হয়েছে।`
+      );
+    } catch (err: any) {
+      setMsg(err?.message || 'Payment Delete করতে সমস্যা হয়েছে।');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   // টাকা জমা
   async function pay() {
     setMsg('');
@@ -214,7 +281,6 @@ export default function Payments() {
         previousDue - paymentAmount
       );
 
-      // Add Due-তে থাকা সব মাসের তালিকা
       const allDueMonths = studentDues.map((d) => ({
         month: d.month,
         total: d.total,
@@ -222,7 +288,6 @@ export default function Payments() {
         remainingBefore: d.remaining
       }));
 
-      // আজ যেসব মাসে টাকা সমন্বয় হয়েছে শুধু সেই মাস
       const adjustedMonths = studentDues
         .map((d) => {
           const allocated = allocations
@@ -556,7 +621,6 @@ export default function Payments() {
             </div>
           </div>
 
-          {/* সব Add Due মাসের তালিকা */}
           <h3>১। যে মাসগুলোর বকেয়া দেওয়া হয়েছে</h3>
 
           <table className="receipt-table">
@@ -579,7 +643,6 @@ export default function Payments() {
             </tbody>
           </table>
 
-          {/* আজ যে মাসগুলোতে টাকা সমন্বয় হয়েছে */}
           <h3 style={{ marginTop: 25 }}>
             ২। যে মাসগুলোর বকেয়া সমন্বয় হয়েছে
           </h3>
@@ -587,22 +650,27 @@ export default function Payments() {
           <table className="receipt-table">
             <thead>
               <tr>
-                <th>ক্রমিক</th>
-                <th>মাস</th>
+                <th>মাসের নাম</th>
                 <th>আজ জমা</th>
                 <th>অবশিষ্ট বকেয়া</th>
               </tr>
             </thead>
 
-           <tbody>
-  {receipt.adjustedMonths.map((d: any, i: number) => (
-    <tr key={i}>
-      <td>{formatMonth(d.month)}</td>
-      <td>৳ {formatMoney(d.todayPaid)}</td>
-      <td>৳ {formatMoney(d.remaining)}</td>
-    </tr>
-  ))}
-</tbody>
+            <tbody>
+              {receipt.adjustedMonths.map((d: any, i: number) => (
+                <tr key={i}>
+                  <td>{formatMonth(d.month)}</td>
+                  <td>৳ {formatMoney(d.todayPaid)}</td>
+                  <td>৳ {formatMoney(d.remaining)}</td>
+                </tr>
+              ))}
+
+              {receipt.adjustedMonths.length === 0 && (
+                <tr>
+                  <td colSpan={3}>কোনো মাস সমন্বয় হয়নি।</td>
+                </tr>
+              )}
+            </tbody>
           </table>
 
           {receipt.note && (
@@ -638,13 +706,61 @@ export default function Payments() {
         </div>
       )}
 
+      {/* Payment List */}
       <div className="panel section no-print">
-        <h2>সাম্প্রতিক পেমেন্ট</h2>
+        <h2>Payment List</h2>
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 12,
+            marginBottom: 15
+          }}
+        >
+          <div>
+            মোট Payment: <strong>{rows.length}</strong>
+            {' | '}
+            নির্বাচিত: <strong>{selectedPaymentIds.length}</strong>
+          </div>
+
+          <button
+            type="button"
+            onClick={deleteSelectedPayments}
+            disabled={
+              deleting || selectedPaymentIds.length === 0
+            }
+            style={{
+              background: selectedPaymentIds.length > 0 ? '#dc2626' : '#999',
+              color: 'white',
+              border: 0,
+              padding: '10px 16px',
+              borderRadius: 6,
+              cursor: selectedPaymentIds.length > 0 ? 'pointer' : 'not-allowed'
+            }}
+          >
+            {deleting
+              ? 'Deleting...'
+              : `Delete Selected (${selectedPaymentIds.length})`}
+          </button>
+        </div>
 
         <div className="tablewrap">
           <table className="table">
             <thead>
               <tr>
+                <th>
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={toggleSelectAll}
+                    disabled={rows.length === 0}
+                    title="Select All"
+                  />
+                  {' '}Select All
+                </th>
                 <th>তারিখ</th>
                 <th>শিক্ষার্থী</th>
                 <th>মাস</th>
@@ -654,23 +770,39 @@ export default function Payments() {
             </thead>
 
             <tbody>
-              {rows.slice(0, 20).map((p) => (
+              {rows.map((p) => (
                 <tr key={p.id}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={selectedPaymentIds.includes(p.id)}
+                      onChange={() => togglePayment(p.id)}
+                    />
+                  </td>
+
                   <td>
                     {p.paid_at
                       ? new Date(p.paid_at).toLocaleDateString('en-BD')
                       : ''}
                   </td>
+
                   <td>{p.students?.name || 'N/A'}</td>
-                  <td>{String(p.fee_month || '').slice(0, 7)}</td>
-                  <td>৳ {formatMoney(Number(p.amount || 0))}</td>
+
+                  <td>
+                    {String(p.fee_month || '').slice(0, 7)}
+                  </td>
+
+                  <td>
+                    ৳ {formatMoney(Number(p.amount || 0))}
+                  </td>
+
                   <td>{p.method || ''}</td>
                 </tr>
               ))}
 
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="empty">
+                  <td colSpan={6} className="empty">
                     এখনো কোনো পেমেন্ট নেই।
                   </td>
                 </tr>
