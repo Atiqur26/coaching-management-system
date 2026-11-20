@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -60,7 +61,7 @@ export default function AddDue() {
 
     setBusy(true);
 
-    const { error } = await supabase()
+    const { error } = await supabase
       .from('student_dues')
       .insert({
         student_id: student,
@@ -103,7 +104,6 @@ export default function AddDue() {
 
         <form onSubmit={saveDue}>
           <div className="formgrid">
-
             <div className="field">
               <label>শিক্ষার্থী নির্বাচন</label>
               <select
@@ -165,7 +165,6 @@ export default function AddDue() {
                 placeholder="বকেয়ার বিবরণ লিখুন"
               />
             </div>
-
           </div>
 
           {msg && (
