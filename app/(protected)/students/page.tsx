@@ -49,7 +49,7 @@ export default function Students() {
   async function deactivate(id: string) {
     if (!confirm('এই শিক্ষার্থীকে নিষ্ক্রিয় করবেন?')) return;
 
-    const { error } = await supabase()
+    const { error } = await supabase
       .from('students')
       .update({ active: false })
       .eq('id', id);
