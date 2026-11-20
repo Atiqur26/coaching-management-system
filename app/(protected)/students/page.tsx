@@ -13,7 +13,7 @@ export default function Students() {
   async function load() {
     setLoading(true);
 
-    let query = supabase()
+    let query = supabase
       .from('students')
       .select('*')
       .eq('active', true)
