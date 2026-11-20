@@ -18,7 +18,6 @@ export default function Payments() {
   const [deleting, setDeleting] = useState(false);
   const [receipt, setReceipt] = useState<any>(null);
 
-  // Payment Select All
   const [selectedPaymentIds, setSelectedPaymentIds] = useState<any[]>([]);
 
   async function load() {
@@ -58,6 +57,11 @@ export default function Payments() {
     setStudents(studentRes.data || []);
     setRows(paymentRes.data || []);
     setDues(dueRes.data || []);
+
+    const validIds = (paymentRes.data || []).map((p: any) => p.id);
+    setSelectedPaymentIds((prev) =>
+      prev.filter((id) => validIds.includes(id))
+    );
   }
 
   useEffect(() => {
@@ -94,7 +98,6 @@ export default function Payments() {
 
   const selectedStudent = students.find((s) => s.id === student);
 
-  // নির্বাচিত শিক্ষার্থীর মাসভিত্তিক বকেয়া
   const studentDues = useMemo(() => {
     if (!student) return [];
 
@@ -109,10 +112,7 @@ export default function Payments() {
               p.student_id === student &&
               String(p.fee_month).slice(0, 7) === month
           )
-          .reduce(
-            (sum, p) => sum + Number(p.amount || 0),
-            0
-          );
+          .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
         const total = Number(d.amount || 0);
 
@@ -142,7 +142,7 @@ export default function Payments() {
     0
   );
 
-  // Payment Select All
+  // Select All
   const allSelected =
     rows.length > 0 &&
     rows.every((p) => selectedPaymentIds.includes(p.id));
@@ -170,8 +170,10 @@ export default function Payments() {
       return;
     }
 
+    const deleteCount = selectedPaymentIds.length;
+
     const confirmed = window.confirm(
-      `আপনি কি ${selectedPaymentIds.length} টি Payment মুছে ফেলতে চান? এই কাজের ফলে সংশ্লিষ্ট বকেয়া আবার যোগ হবে।`
+      `আপনি কি ${deleteCount} টি Payment মুছে ফেলতে চান? এই কাজের ফলে সংশ্লিষ্ট বকেয়া আবার যোগ হবে।`
     );
 
     if (!confirmed) return;
@@ -195,9 +197,7 @@ export default function Payments() {
 
       await load();
 
-      setMsg(
-        `${selectedPaymentIds.length} টি Payment সফলভাবে Delete হয়েছে।`
-      );
+      setMsg(`${deleteCount} টি Payment সফলভাবে Delete হয়েছে।`);
     } catch (err: any) {
       setMsg(err?.message || 'Payment Delete করতে সমস্যা হয়েছে।');
     } finally {
@@ -237,9 +237,9 @@ export default function Payments() {
       const previousDue = totalDue;
       let remainingPayment = paymentAmount;
 
-      // পুরোনো মাসের বকেয়া আগে সমন্বয়
       const allocations: any[] = [];
 
+      // পুরোনো মাসের বকেয়া আগে সমন্বয়
       for (const d of studentDues) {
         if (remainingPayment <= 0) break;
         if (d.remaining <= 0) continue;
@@ -343,6 +343,29 @@ export default function Payments() {
   return (
     <div>
       <style jsx global>{`
+        /* Checkbox সবসময় দৃশ্যমান রাখবে */
+        .payment-checkbox {
+          appearance: auto !important;
+          -webkit-appearance: checkbox !important;
+          display: inline-block !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          width: 20px !important;
+          height: 20px !important;
+          min-width: 20px !important;
+          cursor: pointer !important;
+          accent-color: #2563eb;
+          vertical-align: middle;
+          position: relative;
+          z-index: 2;
+        }
+
+        .payment-select-cell {
+          text-align: center !important;
+          width: 110px;
+          min-width: 110px;
+        }
+
         @media print {
           body * {
             visibility: hidden !important;
@@ -567,7 +590,6 @@ export default function Payments() {
 
       {receipt && (
         <div className="panel section" id="payment-receipt">
-
           <div style={{ textAlign: 'center' }}>
             <h2>PAYMENT RECEIPT</h2>
             <h3>কোচিং সেন্টার</h3>
@@ -708,7 +730,9 @@ export default function Payments() {
 
       {/* Payment List */}
       <div className="panel section no-print">
-        <h2>Payment List</h2>
+        <h2>পেমেন্ট তালিকা</h2>
+
+        {msg && <div className="notice">{msg}</div>}
 
         <div
           style={{
@@ -729,9 +753,7 @@ export default function Payments() {
           <button
             type="button"
             onClick={deleteSelectedPayments}
-            disabled={
-              deleting || selectedPaymentIds.length === 0
-            }
+            disabled={deleting || selectedPaymentIds.length === 0}
             style={{
               background: selectedPaymentIds.length > 0 ? '#dc2626' : '#999',
               color: 'white',
@@ -751,15 +773,17 @@ export default function Payments() {
           <table className="table">
             <thead>
               <tr>
-                <th>
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={toggleSelectAll}
-                    disabled={rows.length === 0}
-                    title="Select All"
-                  />
-                  {' '}Select All
+                <th className="payment-select-cell">
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <input
+                      type="checkbox"
+                      className="payment-checkbox"
+                      checked={allSelected}
+                      onChange={toggleSelectAll}
+                      disabled={rows.length === 0}
+                    />
+                    <span>Select All</span>
+                  </label>
                 </th>
                 <th>তারিখ</th>
                 <th>শিক্ষার্থী</th>
@@ -772,9 +796,10 @@ export default function Payments() {
             <tbody>
               {rows.map((p) => (
                 <tr key={p.id}>
-                  <td>
+                  <td className="payment-select-cell">
                     <input
                       type="checkbox"
+                      className="payment-checkbox"
                       checked={selectedPaymentIds.includes(p.id)}
                       onChange={() => togglePayment(p.id)}
                     />
