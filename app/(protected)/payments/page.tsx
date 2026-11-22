@@ -10,6 +10,16 @@ export default function Payments() {
   const [dues, setDues] = useState<any[]>([]);
 
   const [student, setStudent] = useState('');
+  const [dueMonth, setDueMonth] = useState('');
+  const [paymentDate, setPaymentDate] = useState(() =>
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Dhaka',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date())
+  );
+
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('Cash');
   const [note, setNote] = useState('');
@@ -95,7 +105,12 @@ export default function Payments() {
   function formatDate(value: string) {
     if (!value) return '—';
 
-    return new Date(value).toLocaleDateString('bn-BD', {
+    const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
+    const date = dateOnly
+      ? new Date(value + 'T12:00:00')
+      : new Date(value);
+
+    return date.toLocaleDateString('bn-BD', {
       timeZone: 'Asia/Dhaka',
       day: '2-digit',
       month: 'long',
@@ -144,9 +159,36 @@ export default function Payments() {
       .sort((a, b) => a.month.localeCompare(b.month));
   }, [student, dues, rows]);
 
+  // শিক্ষার্থী পরিবর্তন হলে প্রথম বকেয়া মাস নির্বাচন
+  useEffect(() => {
+    if (!student) {
+      setDueMonth('');
+      return;
+    }
+
+    const firstDue = studentDues.find(d => d.remaining > 0);
+
+    setDueMonth(prev => {
+      const stillDue = studentDues.some(
+        d => d.month === prev && d.remaining > 0
+      );
+
+      return stillDue ? prev : (firstDue?.month || '');
+    });
+  }, [student, studentDues]);
+
   const totalOriginal = studentDues.reduce((sum, d) => sum + d.total, 0);
   const totalPaid = studentDues.reduce((sum, d) => sum + d.paid, 0);
   const totalDue = studentDues.reduce((sum, d) => sum + d.remaining, 0);
+
+  // নির্বাচিত মাস থেকে পরবর্তী মাস পর্যন্ত বকেয়া
+  const payableDues = studentDues.filter(
+    d => dueMonth && d.month >= dueMonth && d.remaining > 0
+  );
+
+  const selectedTotalDue = payableDues.reduce(
+    (sum, d) => sum + d.remaining, 0
+  );
 
   const allSelected =
     rows.length > 0 &&
@@ -210,6 +252,16 @@ export default function Payments() {
       return;
     }
 
+    if (!dueMonth) {
+      setMsg('Due Month Name নির্বাচন করুন।');
+      return;
+    }
+
+    if (!paymentDate) {
+      setMsg('Payment Date নির্বাচন করুন।');
+      return;
+    }
+
     const paymentAmount = Number(amount);
 
     if (!paymentAmount || paymentAmount <= 0) {
@@ -217,13 +269,13 @@ export default function Payments() {
       return;
     }
 
-    if (paymentAmount > totalDue) {
-      setMsg('জমার পরিমাণ মোট বকেয়ার চেয়ে বেশি হতে পারবে না।');
+    if (paymentAmount > selectedTotalDue) {
+      setMsg('জমার পরিমাণ নির্বাচিত মাস ও পরবর্তী মাসগুলোর মোট বকেয়ার চেয়ে বেশি হতে পারবে না।');
       return;
     }
 
-    if (totalDue <= 0) {
-      setMsg('এই শিক্ষার্থীর কোনো বকেয়া নেই।');
+    if (selectedTotalDue <= 0) {
+      setMsg('নির্বাচিত মাস থেকে কোনো বকেয়া পাওয়া যায়নি।');
       return;
     }
 
@@ -235,10 +287,9 @@ export default function Payments() {
       const paidAt = new Date().toISOString();
       const allocations: any[] = [];
 
-      // পুরোনো বকেয়া মাস আগে সমন্বয় হবে
-      for (const d of studentDues) {
+      // নির্বাচিত মাস থেকে পরবর্তী মাসে বকেয়া সমন্বয়
+      for (const d of payableDues) {
         if (remainingPayment <= 0) break;
-        if (d.remaining <= 0) continue;
 
         const allocated = Math.min(remainingPayment, d.remaining);
 
@@ -246,6 +297,8 @@ export default function Payments() {
           student_id: student,
           amount: allocated,
           fee_month: d.month + '-01',
+          due_month_name: formatMonth(d.month),
+          payment_date: paymentDate,
           method,
           note: note || null,
           paid_at: paidAt
@@ -271,7 +324,6 @@ export default function Payments() {
 
       const remainingDue = Math.max(0, previousDue - paymentAmount);
 
-      // শুধু যেসব মাসে আজ টাকা জমা হয়েছে
       const adjustedMonths = studentDues
         .map(d => {
           const allocated = allocations
@@ -297,6 +349,7 @@ export default function Payments() {
         method,
         note,
         paid_at: data?.[0]?.paid_at || paidAt,
+        payment_date: paymentDate,
         adjustedMonths
       });
 
@@ -330,6 +383,7 @@ export default function Payments() {
       method: p.method || 'Cash',
       note: p.note || '',
       paid_at: p.paid_at,
+      payment_date: p.payment_date,
       adjustedMonths: [
         {
           month,
@@ -512,6 +566,7 @@ export default function Payments() {
               value={student}
               onChange={e => {
                 setStudent(e.target.value);
+                setDueMonth('');
                 setReceipt(null);
                 setMsg('');
               }}
@@ -523,6 +578,35 @@ export default function Payments() {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="field">
+            <label>Due Month Name</label>
+            <select
+              className="input"
+              value={dueMonth}
+              onChange={e => setDueMonth(e.target.value)}
+              disabled={!student}
+            >
+              <option value="">বকেয়ার মাস নির্বাচন করুন</option>
+              {studentDues
+                .filter(d => d.remaining > 0)
+                .map(d => (
+                  <option key={d.id} value={d.month}>
+                    {formatMonth(d.month)} — বকেয়া ৳ {formatMoney(d.remaining)}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          <div className="field">
+            <label>Payment Date</label>
+            <input
+              type="date"
+              className="input"
+              value={paymentDate}
+              onChange={e => setPaymentDate(e.target.value)}
+            />
           </div>
 
           <div className="field">
@@ -563,6 +647,14 @@ export default function Payments() {
             />
           </div>
         </div>
+
+        {student && dueMonth && (
+          <div className="notice">
+            নির্বাচিত মাস থেকে পরবর্তী মাসগুলোর মোট বকেয়া:
+            {' '}
+            <strong>৳ {formatMoney(selectedTotalDue)}</strong>
+          </div>
+        )}
 
         {msg && <div className="notice">{msg}</div>}
 
@@ -634,7 +726,7 @@ export default function Payments() {
           <p><strong>রসিদ নং:</strong> {receipt.id || 'N/A'}</p>
           <p><strong>শিক্ষার্থীর নাম:</strong> {receipt.students?.name || ''}</p>
           <p><strong>শিক্ষার্থী আইডি:</strong> {receipt.students?.student_code || ''}</p>
-          <p><strong>জমার তারিখ:</strong> {formatDate(receipt.paid_at)}</p>
+          <p><strong>জমার তারিখ:</strong> {formatDate(receipt.payment_date || receipt.paid_at)}</p>
           <p><strong>জমার সময়:</strong> {formatTime(receipt.paid_at)}</p>
           <p><strong>পেমেন্ট পদ্ধতি:</strong> {receipt.method}</p>
 
@@ -789,8 +881,8 @@ export default function Payments() {
                 </th>
 
                 <th>শিক্ষার্থী</th>
-                <th>যে মাসের টাকা</th>
-                <th>জমার তারিখ</th>
+                <th>Due Month Name</th>
+                <th>Payment Date</th>
                 <th>সময়</th>
                 <th>টাকা</th>
                 <th>পদ্ধতি</th>
@@ -819,10 +911,12 @@ export default function Payments() {
                   </td>
 
                   <td>
-                    <strong>{formatMonth(p.fee_month)}</strong>
+                    <strong>
+                      {p.due_month_name || formatMonth(p.fee_month)}
+                    </strong>
                   </td>
 
-                  <td>{formatDate(p.paid_at)}</td>
+                  <td>{formatDate(p.payment_date || p.paid_at)}</td>
 
                   <td>{formatTime(p.paid_at)}</td>
 
