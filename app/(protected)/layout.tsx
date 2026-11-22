@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import type { ReactNode } from 'react';
 
@@ -24,7 +24,6 @@ export default function DashboardLayout({
   children: ReactNode;
 }) {
   const path = usePathname();
-  const router = useRouter();
 
   const [checking, setChecking] = useState(true);
   const [authorized, setAuthorized] = useState(false);
@@ -40,7 +39,8 @@ export default function DashboardLayout({
 
       if (error || !data.session) {
         setAuthorized(false);
-        router.replace('/login');
+        setChecking(false);
+        window.location.replace('/login');
         return;
       }
 
@@ -50,21 +50,7 @@ export default function DashboardLayout({
 
     verifySession();
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!active) return;
-
-      if (!session || event === 'SIGNED_OUT') {
-        setAuthorized(false);
-        router.replace('/login');
-      } else {
-        setAuthorized(true);
-        setChecking(false);
-      }
-    });
-
-    // Browser Back/Forward থেকে পেজে ফিরলে Session যাচাই
+    // Browser Back/Forward থেকে ফিরলে Session যাচাই
     function handlePageShow() {
       verifySession();
     }
@@ -73,10 +59,9 @@ export default function DashboardLayout({
 
     return () => {
       active = false;
-      subscription.unsubscribe();
       window.removeEventListener('pageshow', handlePageShow);
     };
-  }, [router]);
+  }, []);
 
   async function logout() {
     if (loggingOut) return;
@@ -91,18 +76,19 @@ export default function DashboardLayout({
       return;
     }
 
-    setAuthorized(false);
     window.location.replace('/login');
   }
 
   if (checking || !authorized) {
     return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center'
-      }}>
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}
+      >
         অপেক্ষা করুন...
       </div>
     );
