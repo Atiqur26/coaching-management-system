@@ -79,13 +79,39 @@ export default function Payments() {
   }
 
   function formatMonth(month: string) {
-    const [year, mon] = month.split('-');
+    if (!month) return '—';
+
+    const [year, mon] = String(month).slice(0, 7).split('-');
+
     const names = [
       'জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল',
       'মে', 'জুন', 'জুলাই', 'আগস্ট',
       'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'
     ];
+
     return `${names[Number(mon) - 1] || mon} ${year}`;
+  }
+
+  function formatDate(value: string) {
+    if (!value) return '—';
+
+    return new Date(value).toLocaleDateString('bn-BD', {
+      timeZone: 'Asia/Dhaka',
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric'
+    });
+  }
+
+  function formatTime(value: string) {
+    if (!value) return '—';
+
+    return new Date(value).toLocaleTimeString('bn-BD', {
+      timeZone: 'Asia/Dhaka',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
   }
 
   const selectedStudent = students.find(s => s.id === student);
@@ -206,8 +232,10 @@ export default function Payments() {
     try {
       const previousDue = totalDue;
       let remainingPayment = paymentAmount;
+      const paidAt = new Date().toISOString();
       const allocations: any[] = [];
 
+      // পুরোনো বকেয়া মাস আগে সমন্বয় হবে
       for (const d of studentDues) {
         if (remainingPayment <= 0) break;
         if (d.remaining <= 0) continue;
@@ -220,7 +248,7 @@ export default function Payments() {
           fee_month: d.month + '-01',
           method,
           note: note || null,
-          paid_at: new Date().toISOString()
+          paid_at: paidAt
         });
 
         remainingPayment -= allocated;
@@ -243,13 +271,7 @@ export default function Payments() {
 
       const remainingDue = Math.max(0, previousDue - paymentAmount);
 
-      const allDueMonths = studentDues.map(d => ({
-        month: d.month,
-        total: d.total,
-        paidBefore: d.paid,
-        remainingBefore: d.remaining
-      }));
-
+      // শুধু যেসব মাসে আজ টাকা জমা হয়েছে
       const adjustedMonths = studentDues
         .map(d => {
           const allocated = allocations
@@ -274,8 +296,7 @@ export default function Payments() {
         totalDueAfter: remainingDue,
         method,
         note,
-        paid_at: data?.[0]?.paid_at || new Date().toISOString(),
-        allDueMonths,
+        paid_at: data?.[0]?.paid_at || paidAt,
         adjustedMonths
       });
 
@@ -308,15 +329,11 @@ export default function Payments() {
       totalDueAfter: null,
       method: p.method || 'Cash',
       note: p.note || '',
-      paid_at: p.paid_at || new Date().toISOString(),
-      allDueMonths: [
-        { month, total: paymentAmount }
-      ],
+      paid_at: p.paid_at,
       adjustedMonths: [
         {
           month,
-          todayPaid: paymentAmount,
-          remaining: 0
+          todayPaid: paymentAmount
         }
       ]
     });
@@ -603,6 +620,7 @@ export default function Payments() {
         </div>
       )}
 
+      {/* Money Receipt */}
       {receipt && (
         <div className="panel section" id="payment-receipt">
           <div style={{ textAlign: 'center' }}>
@@ -616,10 +634,8 @@ export default function Payments() {
           <p><strong>রসিদ নং:</strong> {receipt.id || 'N/A'}</p>
           <p><strong>শিক্ষার্থীর নাম:</strong> {receipt.students?.name || ''}</p>
           <p><strong>শিক্ষার্থী আইডি:</strong> {receipt.students?.student_code || ''}</p>
-          <p>
-            <strong>তারিখ:</strong>{' '}
-            {new Date(receipt.paid_at).toLocaleString('en-BD')}
-          </p>
+          <p><strong>জমার তারিখ:</strong> {formatDate(receipt.paid_at)}</p>
+          <p><strong>জমার সময়:</strong> {formatTime(receipt.paid_at)}</p>
           <p><strong>পেমেন্ট পদ্ধতি:</strong> {receipt.method}</p>
 
           <div className="receipt-summary">
@@ -631,7 +647,7 @@ export default function Payments() {
             )}
 
             <div>
-              <strong>আজ জমা</strong>
+              <strong>আজ মোট জমা</strong>
               <h3>৳ {formatMoney(receipt.amount)}</h3>
             </div>
 
@@ -641,52 +657,25 @@ export default function Payments() {
                 <h3>৳ {formatMoney(receipt.totalDueAfter)}</h3>
               </div>
             )}
-
-            <div>
-              <strong>পেমেন্ট পদ্ধতি</strong>
-              <h3>{receipt.method}</h3>
-            </div>
           </div>
 
-          <h3>১। যে মাসগুলোর বকেয়া দেওয়া হয়েছে</h3>
+          <h3>যে মাসগুলোর টাকা জমা হয়েছে</h3>
 
           <table className="receipt-table">
             <thead>
               <tr>
                 <th>ক্রমিক</th>
-                <th>মাস</th>
-                <th>মোট বকেয়া</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {receipt.allDueMonths.map((d: any, i: number) => (
-                <tr key={i}>
-                  <td>{i + 1}</td>
-                  <td>{formatMonth(d.month)}</td>
-                  <td>৳ {formatMoney(d.total)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <h3>২। যে মাসগুলোর বকেয়া সমন্বয় হয়েছে</h3>
-
-          <table className="receipt-table">
-            <thead>
-              <tr>
-                <th>মাসের নাম</th>
-                <th>আজ জমা</th>
-                <th>অবশিষ্ট বকেয়া</th>
+                <th>জমার মাস</th>
+                <th>জমার পরিমাণ</th>
               </tr>
             </thead>
 
             <tbody>
               {receipt.adjustedMonths.map((d: any, i: number) => (
                 <tr key={i}>
+                  <td>{i + 1}</td>
                   <td>{formatMonth(d.month)}</td>
                   <td>৳ {formatMoney(d.todayPaid)}</td>
-                  <td>৳ {formatMoney(d.remaining)}</td>
                 </tr>
               ))}
             </tbody>
@@ -721,12 +710,10 @@ export default function Payments() {
                 Atiq
               </div>
 
-              <div
-                style={{
-                  borderTop: '1px solid #000',
-                  paddingTop: 7
-                }}
-              >
+              <div style={{
+                borderTop: '1px solid #000',
+                paddingTop: 7
+              }}>
                 <strong>Authorized Signature</strong>
                 <p style={{ margin: '4px 0 0' }}>Atiq</p>
               </div>
@@ -741,21 +728,20 @@ export default function Payments() {
         </div>
       )}
 
+      {/* Payment List */}
       <div className="panel section no-print">
         <h2>পেমেন্ট তালিকা</h2>
 
         {msg && <div className="notice">{msg}</div>}
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: 12,
-            marginBottom: 15
-          }}
-        >
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 12,
+          marginBottom: 15
+        }}>
           <div>
             মোট Payment: <strong>{rows.length}</strong>
             {' | '}
@@ -786,7 +772,11 @@ export default function Payments() {
             <thead>
               <tr>
                 <th className="payment-select-cell">
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <label style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}>
                     <input
                       type="checkbox"
                       className="payment-checkbox"
@@ -797,9 +787,11 @@ export default function Payments() {
                     <span>Select All</span>
                   </label>
                 </th>
-                <th>তারিখ</th>
+
                 <th>শিক্ষার্থী</th>
-                <th>মাস</th>
+                <th>যে মাসের টাকা</th>
+                <th>জমার তারিখ</th>
+                <th>সময়</th>
                 <th>টাকা</th>
                 <th>পদ্ধতি</th>
                 <th>Action</th>
@@ -819,14 +811,23 @@ export default function Payments() {
                   </td>
 
                   <td>
-                    {p.paid_at
-                      ? new Date(p.paid_at).toLocaleDateString('en-BD')
-                      : ''}
+                    {p.students?.name || 'N/A'}
+                    <span className="muted">
+                      {' '}
+                      {p.students?.student_code || ''}
+                    </span>
                   </td>
 
-                  <td>{p.students?.name || 'N/A'}</td>
-                  <td>{String(p.fee_month || '').slice(0, 7)}</td>
+                  <td>
+                    <strong>{formatMonth(p.fee_month)}</strong>
+                  </td>
+
+                  <td>{formatDate(p.paid_at)}</td>
+
+                  <td>{formatTime(p.paid_at)}</td>
+
                   <td>৳ {formatMoney(Number(p.amount || 0))}</td>
+
                   <td>{p.method || ''}</td>
 
                   <td>
@@ -843,7 +844,7 @@ export default function Payments() {
 
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="empty">
+                  <td colSpan={8} className="empty">
                     এখনো কোনো পেমেন্ট নেই।
                   </td>
                 </tr>
