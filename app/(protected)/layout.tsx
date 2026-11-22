@@ -1,8 +1,9 @@
 
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import type { ReactNode } from 'react';
 
@@ -23,10 +24,88 @@ export default function DashboardLayout({
   children: ReactNode;
 }) {
   const path = usePathname();
+  const router = useRouter();
+
+  const [checking, setChecking] = useState(true);
+  const [authorized, setAuthorized] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    async function verifySession() {
+      const { data, error } = await supabase.auth.getSession();
+
+      if (!active) return;
+
+      if (error || !data.session) {
+        setAuthorized(false);
+        router.replace('/login');
+        return;
+      }
+
+      setAuthorized(true);
+      setChecking(false);
+    }
+
+    verifySession();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active) return;
+
+      if (!session || event === 'SIGNED_OUT') {
+        setAuthorized(false);
+        router.replace('/login');
+      } else {
+        setAuthorized(true);
+        setChecking(false);
+      }
+    });
+
+    // Browser Back/Forward থেকে পেজে ফিরলে Session যাচাই
+    function handlePageShow() {
+      verifySession();
+    }
+
+    window.addEventListener('pageshow', handlePageShow);
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+      window.removeEventListener('pageshow', handlePageShow);
+    };
+  }, [router]);
 
   async function logout() {
-    await supabase.auth.signOut();
-    window.location.href = '/login';
+    if (loggingOut) return;
+
+    setLoggingOut(true);
+
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      alert('Logout হয়নি: ' + error.message);
+      setLoggingOut(false);
+      return;
+    }
+
+    setAuthorized(false);
+    window.location.replace('/login');
+  }
+
+  if (checking || !authorized) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center'
+      }}>
+        অপেক্ষা করুন...
+      </div>
+    );
   }
 
   return (
@@ -68,11 +147,13 @@ export default function DashboardLayout({
       <div className="main">
         <header className="topbar">
           <strong>প্রতিষ্ঠান ব্যবস্থাপনা</strong>
+
           <button
             className="btn secondary"
             onClick={logout}
+            disabled={loggingOut}
           >
-            লগআউট
+            {loggingOut ? 'অপেক্ষা করুন...' : 'লগআউট'}
           </button>
         </header>
 
