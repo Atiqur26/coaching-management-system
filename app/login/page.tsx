@@ -2,12 +2,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 export default function Login() {
-  const router = useRouter();
-
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -18,12 +15,18 @@ export default function Login() {
     let active = true;
 
     async function checkLogin() {
-      const { data } = await supabase.auth.getSession();
+      const { data, error } = await supabase.auth.getSession();
 
       if (!active) return;
 
+      if (error) {
+        setError(error.message);
+        setChecking(false);
+        return;
+      }
+
       if (data.session) {
-        router.replace('/dashboard');
+        window.location.replace('/dashboard');
       } else {
         setChecking(false);
       }
@@ -31,18 +34,10 @@ export default function Login() {
 
     checkLogin();
 
-    const { data: { subscription } } =
-      supabase.auth.onAuthStateChange((_event, session) => {
-        if (session) {
-          router.replace('/dashboard');
-        }
-      });
-
     return () => {
       active = false;
-      subscription.unsubscribe();
     };
-  }, [router]);
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -52,7 +47,7 @@ export default function Login() {
 
     try {
       const { error } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password
       });
 
@@ -62,8 +57,7 @@ export default function Login() {
         return;
       }
 
-      router.replace('/dashboard');
-      router.refresh();
+      window.location.replace('/dashboard');
 
     } catch (err: any) {
       setError(err?.message || 'লগইন করতে সমস্যা হয়েছে।');
@@ -120,6 +114,7 @@ export default function Login() {
 
         <button
           className="btn"
+          type="submit"
           disabled={busy}
           style={{
             width: '100%',
@@ -131,7 +126,7 @@ export default function Login() {
         </button>
 
         <p className="muted" style={{ fontSize: 12, marginTop: 18 }}>
-          Made By Atiqur Rahman 
+          Made By Atiqur Rahman
         </p>
       </form>
     </main>
