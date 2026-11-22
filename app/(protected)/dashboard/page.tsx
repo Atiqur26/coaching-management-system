@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -11,6 +12,13 @@ type Stats = {
   due: number;
 };
 
+type MonthData = {
+  month: string;
+  due: number;
+  paid: number;
+  remaining: number;
+};
+
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats>({
     students: 0,
@@ -20,83 +28,177 @@ export default function Dashboard() {
   });
 
   const [recent, setRecent] = useState<any[]>([]);
+  const [monthlyData, setMonthlyData] = useState<MonthData[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const money = (value: number) =>
+    value.toLocaleString('en-BD');
+
+  const getMonthKey = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  };
+
+  const monthName = (value: string) => {
+    if (!value) return '—';
+
+    const [year, month] = value.slice(0, 7).split('-');
+
+    const date = new Date(Number(year), Number(month) - 1, 1);
+
+    return date.toLocaleDateString('bn-BD', {
+      month: 'long',
+      year: 'numeric'
+    });
+  };
+
+  const dateFormat = (value: string) => {
+    if (!value) return '—';
+
+    return new Date(value).toLocaleDateString('bn-BD', {
+      timeZone: 'Asia/Dhaka',
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric'
+    });
+  };
+
+  const timeFormat = (value: string) => {
+    if (!value) return '—';
+
+    return new Date(value).toLocaleTimeString('bn-BD', {
+      timeZone: 'Asia/Dhaka',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  };
 
   useEffect(() => {
     async function loadDashboard() {
-      const [
-        { count },
-        { data: students },
-        { data: payments },
-        { data: recentPayments }
-      ] = await Promise.all([
-        supabase
-          .from('students')
-          .select('*', { count: 'exact', head: true })
-          .eq('active', true),
+      setLoading(true);
 
-        supabase
-          .from('students')
-          .select('id, monthly_fee')
-          .eq('active', true),
+      try {
+        const [
+          { count, error: studentCountError },
+          { data: payments, error: paymentError },
+          { data: recentPayments, error: recentError },
+          { data: dues, error: dueError }
+        ] = await Promise.all([
+          supabase
+            .from('students')
+            .select('*', { count: 'exact', head: true })
+            .eq('active', true),
 
-        supabase
-          .from('payments')
-          .select('student_id, amount, paid_at, fee_month'),
+          supabase
+            .from('payments')
+            .select('student_id, amount, paid_at, fee_month'),
 
-        supabase
-          .from('payments')
-          .select('id, amount, paid_at, students(name, student_code)')
-          .order('paid_at', { ascending: false })
-          .limit(6)
-      ]);
+          supabase
+            .from('payments')
+            .select('id, student_id, amount, paid_at, fee_month, students(name, student_code)')
+            .order('paid_at', { ascending: false })
+            .limit(10),
 
-      const paymentRows = payments || [];
-      const studentRows = students || [];
+          supabase
+            .from('student_dues')
+            .select('student_id, due_month, amount')
+        ]);
 
-      const income = paymentRows.reduce(
-        (sum, p) => sum + Number(p.amount || 0),
-        0
-      );
+        if (studentCountError) throw studentCountError;
+        if (paymentError) throw paymentError;
+        if (recentError) throw recentError;
+        if (dueError) throw dueError;
 
-      const monthKey = new Date().toISOString().slice(0, 7);
+        const paymentRows = payments || [];
+        const dueRows = dues || [];
 
-      const month = paymentRows
-        .filter(p => p.paid_at?.slice(0, 7) === monthKey)
-        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+        // মোট আদায়
+        const income = paymentRows.reduce(
+          (sum, p) => sum + Number(p.amount || 0),
+          0
+        );
 
-      const paidByStudent = new Map<string, number>();
+        const currentMonth = getMonthKey(new Date());
 
-      paymentRows
-        .filter(p => p.fee_month?.slice(0, 7) === monthKey)
-        .forEach(p => {
-          paidByStudent.set(
-            p.student_id,
-            (paidByStudent.get(p.student_id) || 0) +
+        // মাস অনুযায়ী Payment
+        const paidByMonth = new Map<string, number>();
+
+        paymentRows.forEach(p => {
+          if (!p.fee_month) return;
+
+          const key = String(p.fee_month).slice(0, 7);
+
+          paidByMonth.set(
+            key,
+            (paidByMonth.get(key) || 0) +
               Number(p.amount || 0)
           );
         });
 
-      const due = studentRows.reduce((sum, student) => {
-        return (
-          sum +
-          Math.max(
-            0,
-            Number(student.monthly_fee || 0) -
-              (paidByStudent.get(student.id) || 0)
-          )
+        // Add Due থেকে মাস অনুযায়ী বকেয়া
+        const dueByMonth = new Map<string, number>();
+
+        dueRows.forEach(d => {
+          if (!d.due_month) return;
+
+          const key = String(d.due_month).slice(0, 7);
+
+          dueByMonth.set(
+            key,
+            (dueByMonth.get(key) || 0) +
+              Number(d.amount || 0)
+          );
+        });
+
+        // চলতি ফি মাসের Payment
+        const month = paidByMonth.get(currentMonth) || 0;
+
+        // চলতি ফি মাসের Due
+        const currentDue = Math.max(
+          0,
+          (dueByMonth.get(currentMonth) || 0) - month
         );
-      }, 0);
 
-      setStats({
-        students: count || 0,
-        income,
-        month,
-        due
-      });
+        // প্রতিটি মাসের Due ও Payment সমন্বয়
+        const allMonths = Array.from(
+          new Set([
+            ...dueByMonth.keys(),
+            ...paidByMonth.keys()
+          ])
+        ).sort();
 
-      setRecent(recentPayments || []);
-      setLoading(false);
+        const monthList: MonthData[] = allMonths
+          .map(key => {
+            const dueAmount = dueByMonth.get(key) || 0;
+            const paidAmount = paidByMonth.get(key) || 0;
+
+            return {
+              month: key,
+              due: dueAmount,
+              paid: paidAmount,
+              remaining: Math.max(0, dueAmount - paidAmount)
+            };
+          })
+          .filter(item => item.due > 0 || item.paid > 0)
+          .reverse();
+
+        setStats({
+          students: count || 0,
+          income,
+          month,
+          due: currentDue
+        });
+
+        setMonthlyData(monthList);
+        setRecent(recentPayments || []);
+
+      } catch (error: any) {
+        console.error('Dashboard error:', error);
+      } finally {
+        setLoading(false);
+      }
     }
 
     loadDashboard();
@@ -111,12 +213,9 @@ export default function Dashboard() {
 
   const chartData = [
     { label: 'মোট আদায়', value: stats.income },
-    { label: 'এই মাসের Payment', value: stats.month },
-    { label: 'চলতি মাসের Due', value: stats.due }
+    { label: 'চলতি ফি মাসের Payment', value: stats.month },
+    { label: 'চলতি ফি মাসের Due', value: stats.due }
   ];
-
-  const money = (value: number) =>
-    value.toLocaleString('en-BD');
 
   return (
     <>
@@ -137,6 +236,7 @@ export default function Dashboard() {
         <div className="card">ড্যাশবোর্ড লোড হচ্ছে...</div>
       ) : (
         <>
+          {/* Statistics */}
           <div className="grid">
             <div className="card">
               <div className="stat-label">সক্রিয় শিক্ষার্থী</div>
@@ -153,21 +253,21 @@ export default function Dashboard() {
             </div>
 
             <div className="card">
-              <div className="stat-label">এই মাসের আয়</div>
+              <div className="stat-label">চলতি ফি মাসের আয়</div>
               <div className="stat-value">
                 ৳ {money(stats.month)}
               </div>
             </div>
 
             <div className="card">
-              <div className="stat-label">চলতি মাসের বকেয়া</div>
+              <div className="stat-label">চলতি ফি মাসের বকেয়া</div>
               <div className="stat-value">
                 ৳ {money(stats.due)}
               </div>
             </div>
           </div>
 
-          {/* Income, Payment and Due Bar Chart */}
+          {/* Chart */}
           <div className="panel section">
             <h2 style={{ fontSize: 19, marginBottom: 20 }}>
               আয়, Payment ও Due চার্ট
@@ -187,8 +287,7 @@ export default function Dashboard() {
               {chartData.map((item, index) => {
                 const colors = ['#2563eb', '#16a34a', '#ea580c'];
 
-                const height =
-                  (item.value / maxValue) * 180;
+                const height = (item.value / maxValue) * 180;
 
                 return (
                   <div
@@ -218,17 +317,70 @@ export default function Dashboard() {
                       }}
                     />
 
-                    <span
-                      style={{
-                        fontSize: 12,
-                        textAlign: 'center'
-                      }}
-                    >
+                    <span style={{
+                      fontSize: 12,
+                      textAlign: 'center'
+                    }}>
                       {item.label}
                     </span>
                   </div>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Month Wise Payment and Due */}
+          <div className="panel section">
+            <h2 style={{ fontSize: 19, marginTop: 0 }}>
+              মাসভিত্তিক Payment ও Due তালিকা
+            </h2>
+
+            <div className="tablewrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>মাস</th>
+                    <th>মোট Due</th>
+                    <th>জমা</th>
+                    <th>অবশিষ্ট বকেয়া</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {monthlyData.map(item => (
+                    <tr key={item.month}>
+                      <td>
+                        <strong>{monthName(item.month)}</strong>
+                      </td>
+
+                      <td>৳ {money(item.due)}</td>
+
+                      <td style={{ color: '#16a34a' }}>
+                        ৳ {money(item.paid)}
+                      </td>
+
+                      <td style={{
+                        color: item.remaining > 0 ? '#dc2626' : '#16a34a',
+                        fontWeight: 'bold'
+                      }}>
+                        ৳ {money(item.remaining)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {!monthlyData.length && (
+                <div className="empty">
+                  এখনো কোনো মাসের Due বা Payment পাওয়া যায়নি।
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 15 }}>
+              <Link href="/dues" className="btn secondary">
+                বিস্তারিত Due তালিকা
+              </Link>
             </div>
           </div>
 
@@ -252,7 +404,9 @@ export default function Dashboard() {
                 <thead>
                   <tr>
                     <th>শিক্ষার্থী</th>
-                    <th>তারিখ</th>
+                    <th>যে মাসের Payment</th>
+                    <th>জমার তারিখ</th>
+                    <th>সময়</th>
                     <th>পরিমাণ</th>
                   </tr>
                 </thead>
@@ -269,9 +423,17 @@ export default function Dashboard() {
                       </td>
 
                       <td>
-                        {p.paid_at
-                          ? new Date(p.paid_at).toLocaleDateString('bn-BD')
-                          : '—'}
+                        <strong>
+                          {monthName(p.fee_month)}
+                        </strong>
+                      </td>
+
+                      <td>
+                        {dateFormat(p.paid_at)}
+                      </td>
+
+                      <td>
+                        {timeFormat(p.paid_at)}
                       </td>
 
                       <td>
