@@ -341,7 +341,7 @@ export default function DuesPage() {
 
       <body>
         <div class="header">
-          <h2>Coaching Management</h2>
+          <h2>Mathematics Coaching </h2>
           <h3>শিক্ষার্থীর বকেয়া বিবরণী</h3>
         </div>
 
