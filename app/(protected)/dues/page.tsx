@@ -32,6 +32,7 @@ export default function DuesPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [deleting, setDeleting] = useState(false);
 
+  // Load Due and Payment Data
   async function loadData() {
     setLoading(true);
 
@@ -68,6 +69,7 @@ export default function DuesPage() {
     loadData();
   }, []);
 
+  // Format Month
   function formatMonth(month: string) {
     const [year, mon] = month.slice(0, 7).split('-');
     const date = new Date(Number(year), Number(mon) - 1, 1);
@@ -78,6 +80,7 @@ export default function DuesPage() {
     });
   }
 
+  // Calculate Paid Amount
   function getPaid(studentId: string, month: string) {
     return payments
       .filter(
@@ -88,6 +91,7 @@ export default function DuesPage() {
       .reduce((sum, p) => sum + Number(p.amount || 0), 0);
   }
 
+  // Due List
   const dueList = useMemo(() => {
     return dues
       .map(d => {
@@ -119,12 +123,14 @@ export default function DuesPage() {
       );
   }, [dues, payments, search, selectedMonth]);
 
+  // Available Months
   const months = useMemo(() => {
     return [...new Set(
       dues.map(d => d.due_month.slice(0, 7))
     )].sort();
   }, [dues]);
 
+  // Group by Student
   const groupedDues = useMemo(() => {
     const groups: Record<string, typeof dueList> = {};
 
@@ -139,11 +145,13 @@ export default function DuesPage() {
     return Object.values(groups);
   }, [dueList]);
 
+  // Total Due
   const totalDue = dueList.reduce(
     (sum, d) => sum + d.remaining,
     0
   );
 
+  // Select All
   const allSelected =
     dueList.length > 0 &&
     dueList.every(d => selectedIds.includes(d.id));
@@ -168,6 +176,7 @@ export default function DuesPage() {
     }
   }
 
+  // Delete Selected
   async function deleteSelected() {
     if (!selectedIds.length) {
       alert('প্রথমে বকেয়া নির্বাচন করুন।');
@@ -199,13 +208,210 @@ export default function DuesPage() {
     await loadData();
   }
 
+  // Money Format
   const money = (amount: number) =>
     amount.toLocaleString('en-US', {
       maximumFractionDigits: 2
     });
 
+  // Escape HTML
+  function escapeHtml(value: string) {
+    return value.replace(/[&<>"']/g, char => {
+      const entities: Record<string, string> = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      };
+
+      return entities[char];
+    });
+  }
+
+  // Individual Student PDF
+  function downloadStudentPDF(studentDues: typeof dueList) {
+    const student = studentDues[0]?.students;
+
+    if (!student) {
+      alert('শিক্ষার্থীর তথ্য পাওয়া যায়নি।');
+      return;
+    }
+
+    const total = studentDues.reduce(
+      (sum, d) => sum + d.total,
+      0
+    );
+
+    const paid = studentDues.reduce(
+      (sum, d) => sum + d.paid,
+      0
+    );
+
+    const remaining = studentDues.reduce(
+      (sum, d) => sum + d.remaining,
+      0
+    );
+
+    const rows = studentDues.map((d, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${escapeHtml(formatMonth(d.due_month))}</td>
+        <td>৳ ${money(d.total)}</td>
+        <td>৳ ${money(d.paid)}</td>
+        <td>৳ ${money(d.remaining)}</td>
+      </tr>
+    `).join('');
+
+    const printWindow = window.open('', '_blank');
+
+    if (!printWindow) {
+      alert('Popup Blocker বন্ধ করে আবার চেষ্টা করুন।');
+      return;
+    }
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html lang="bn">
+      <head>
+        <meta charset="UTF-8">
+        <title>Student Due Report</title>
+
+        <style>
+          body {
+            font-family: Arial, "Noto Sans Bengali", sans-serif;
+            padding: 25px;
+            color: #111;
+          }
+
+          .header {
+            text-align: center;
+            border-bottom: 2px solid #222;
+            padding-bottom: 15px;
+          }
+
+          .header h2 {
+            margin: 0 0 8px;
+          }
+
+          .info {
+            line-height: 2;
+            margin: 20px 0;
+          }
+
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+          }
+
+          th, td {
+            border: 1px solid #555;
+            padding: 10px;
+            text-align: center;
+          }
+
+          th {
+            background: #eee;
+          }
+
+          .summary {
+            margin-top: 25px;
+            line-height: 2;
+          }
+
+          .total {
+            font-size: 20px;
+            font-weight: bold;
+            color: #c00;
+          }
+
+          .signature {
+            margin-top: 60px;
+            text-align: right;
+          }
+
+          @media print {
+            body {
+              padding: 10px;
+            }
+          }
+        </style>
+      </head>
+
+      <body>
+        <div class="header">
+          <h2>Coaching Management</h2>
+          <h3>শিক্ষার্থীর বকেয়া বিবরণী</h3>
+        </div>
+
+        <div class="info">
+          <strong>Student ID:</strong>
+          ${escapeHtml(student.student_code || '-')}
+          <br>
+
+          <strong>শিক্ষার্থীর নাম:</strong>
+          ${escapeHtml(student.name || '-')}
+          <br>
+
+          <strong>কোর্স:</strong>
+          ${escapeHtml(student.program || '-')}
+          <br>
+
+          <strong>তারিখ:</strong>
+          ${new Date().toLocaleDateString('bn-BD')}
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>ক্রমিক</th>
+              <th>বকেয়া মাস</th>
+              <th>মোট টাকা</th>
+              <th>জমা</th>
+              <th>অবশিষ্ট বকেয়া</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+
+        <div class="summary">
+          মোট পাওনা: ৳ ${money(total)}
+          <br>
+
+          মোট জমা: ৳ ${money(paid)}
+          <br>
+
+          <div class="total">
+            সর্বমোট বকেয়া: ৳ ${money(remaining)}
+          </div>
+        </div>
+
+        <div class="signature">
+          <p>কর্তৃপক্ষের স্বাক্ষর</p>
+          <br><br>
+          ______________________
+        </div>
+
+        <script>
+          window.onload = function() {
+            window.print();
+          };
+        </script>
+      </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+  }
+
   return (
     <div style={{ padding: 20 }}>
+
+      {/* Header */}
       <div
         style={{
           display: 'flex',
@@ -222,6 +428,7 @@ export default function DuesPage() {
         </button>
       </div>
 
+      {/* Summary */}
       <div
         style={{
           background: '#fff7ed',
@@ -232,13 +439,16 @@ export default function DuesPage() {
         }}
       >
         <div>সর্বমোট অবশিষ্ট বকেয়া</div>
+
         <h2 style={{ margin: '8px 0', color: '#c2410c' }}>
           ৳ {money(totalDue)}
         </h2>
+
         <div>বকেয়া মাসের সংখ্যা: {dueList.length}</div>
         <div>বকেয়া শিক্ষার্থী: {groupedDues.length} জন</div>
       </div>
 
+      {/* Search and Month Filter */}
       <div
         style={{
           display: 'flex',
@@ -274,6 +484,7 @@ export default function DuesPage() {
           }}
         >
           <option value="all">সকল মাস</option>
+
           {months.map(month => (
             <option key={month} value={month}>
               {formatMonth(month)}
@@ -282,6 +493,7 @@ export default function DuesPage() {
         </select>
       </div>
 
+      {/* Select All and Delete */}
       <div
         style={{
           display: 'flex',
@@ -291,7 +503,13 @@ export default function DuesPage() {
           marginBottom: 18
         }}
       >
-        <label style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+        <label
+          style={{
+            display: 'flex',
+            gap: 7,
+            alignItems: 'center'
+          }}
+        >
           <input
             type="checkbox"
             checked={allSelected}
@@ -299,6 +517,7 @@ export default function DuesPage() {
             disabled={!dueList.length}
             style={{ width: 19, height: 19 }}
           />
+
           সব নির্বাচন করুন
         </label>
 
@@ -319,6 +538,7 @@ export default function DuesPage() {
         </button>
       </div>
 
+      {/* Due List */}
       {loading ? (
         <p>লোড হচ্ছে...</p>
       ) : groupedDues.length === 0 ? (
@@ -351,6 +571,7 @@ export default function DuesPage() {
                 overflow: 'hidden'
               }}
             >
+              {/* Student Information */}
               <div
                 style={{
                   background: '#f3f4f6',
@@ -367,11 +588,35 @@ export default function DuesPage() {
                   কোর্স: {student?.program || '-'}
                 </div>
 
-                <strong style={{ color: '#dc2626' }}>
+                <strong
+                  style={{
+                    color: '#dc2626',
+                    display: 'block',
+                    marginTop: 7
+                  }}
+                >
                   মোট বকেয়া: ৳ {money(studentTotal)}
                 </strong>
+
+                {/* Individual PDF Button */}
+                <button
+                  onClick={() => downloadStudentPDF(studentDues)}
+                  style={{
+                    marginTop: 12,
+                    padding: '10px 18px',
+                    background: '#15803d',
+                    color: 'white',
+                    border: 0,
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  ↓ Download PDF
+                </button>
               </div>
 
+              {/* Student Due Table */}
               <div style={{ overflowX: 'auto' }}>
                 <table
                   style={{
@@ -439,6 +684,7 @@ export default function DuesPage() {
   );
 }
 
+// Button Style
 const buttonStyle: React.CSSProperties = {
   padding: '10px 18px',
   background: '#2563eb',
@@ -448,6 +694,7 @@ const buttonStyle: React.CSSProperties = {
   cursor: 'pointer'
 };
 
+// Table Cell Style
 const cellStyle: React.CSSProperties = {
   border: '1px solid #ddd',
   padding: 10,
